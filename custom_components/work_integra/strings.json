@@ -1,0 +1,34 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Work Pro Integra",
+        "description": "Gib die Netzwerkdaten deiner Integra ein. Der UDP-Standardport ist 50000. Aktiviere am Gerät unter \"Device Setting\" den Schalter \"central control reply\".",
+        "data": {
+          "host": "IP-Adresse",
+          "port": "UDP-Port",
+          "outputs": "Anzahl Output-Kanäle",
+          "inputs": "Anzahl Input-Kanäle"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung fehlgeschlagen. Prüfe IP, Port und ob \"central control reply\" am Gerät aktiv ist."
+    },
+    "abort": {
+      "already_configured": "Diese Integra ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "inputs": {
+        "title": "Eingänge benennen",
+        "description": "Optionaler Name je Eingang (Felder sind 0-basiert: input_name_0 = Eingang 1). Vorausgefüllt mit dem Gerätenamen – leer lassen, um den Gerätenamen zu behalten."
+      },
+      "outputs": {
+        "title": "Ausgänge benennen",
+        "description": "Optionaler Name je Ausgang (0-basiert: output_name_0 = Ausgang 1). Vorausgefüllt mit dem Gerätenamen."
+      }
+    }
+  }
+}
