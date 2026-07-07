@@ -1,4 +1,8 @@
-"""Switch-Entities: Mute je Input- und Output-Kanal."""
+"""Switch-Entities: Mute je Input- und Output-Kanal.
+
+Robustheit (v2): optimistisches Schalten ohne erzwungenen Sofort-Refresh und
+tolerante Verfügbarkeit (ein verpasster Poll macht den Schalter nicht offline).
+"""
 
 from __future__ import annotations
 
@@ -56,8 +60,13 @@ class IntegraMute(CoordinatorEntity[IntegraCoordinator], SwitchEntity):
         )
 
     @property
+    def available(self) -> bool:
+        data = self.coordinator.data.get(f"{self._kind}_mute", {}) if self.coordinator.data else {}
+        return self._channel in data
+
+    @property
     def is_on(self) -> bool | None:
-        data = self.coordinator.data.get(f"{self._kind}_mute", {})
+        data = self.coordinator.data.get(f"{self._kind}_mute", {}) if self.coordinator.data else {}
         return data.get(self._channel)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -67,8 +76,11 @@ class IntegraMute(CoordinatorEntity[IntegraCoordinator], SwitchEntity):
         await self._set_mute(False)
 
     async def _set_mute(self, mute: bool) -> None:
+        # Optimistisch sofort anzeigen, dann senden (kein Sofort-Refresh).
+        if self.coordinator.data is not None:
+            self.coordinator.data.setdefault(f"{self._kind}_mute", {})[self._channel] = mute
+            self.async_write_ha_state()
         if self._kind == "input":
             await self.coordinator.client.set_input_mute(self._channel, mute)
         else:
             await self.coordinator.client.set_output_mute(self._channel, mute)
-        await self.coordinator.async_request_refresh()

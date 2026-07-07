@@ -1,4 +1,10 @@
-"""Number-Entities: Lautstärke (Gain) je Input- und Output-Kanal."""
+"""Number-Entities: Lautstärke (Gain) je Input- und Output-Kanal.
+
+Robustheit (v2): Beim Schieben wird der Wert sofort optimistisch angezeigt und
+KEIN erzwungener Sofort-Refresh mehr ausgelöst (der periodische Poll gleicht ab).
+Die Entität bleibt verfügbar, solange irgendwann ein Wert gelesen wurde – ein
+kurzer Poll-Aussetzer lässt den Fader damit nicht mehr auf Null springen.
+"""
 
 from __future__ import annotations
 
@@ -70,13 +76,24 @@ class IntegraGain(CoordinatorEntity[IntegraCoordinator], NumberEntity):
         )
 
     @property
+    def available(self) -> bool:
+        # Verfügbar, solange wir je einen Wert für diesen Kanal hatten.
+        # Ein einzelner verpasster Poll macht die Entität damit nicht offline.
+        gains = self.coordinator.data.get(f"{self._kind}_gain", {}) if self.coordinator.data else {}
+        return self._channel in gains
+
+    @property
     def native_value(self) -> float | None:
-        data = self.coordinator.data.get(f"{self._kind}_gain", {})
+        data = self.coordinator.data.get(f"{self._kind}_gain", {}) if self.coordinator.data else {}
         return data.get(self._channel)
 
     async def async_set_native_value(self, value: float) -> None:
+        # 1) Optimistisch sofort anzeigen -> Fader bleibt beim Schieben stehen.
+        if self.coordinator.data is not None:
+            self.coordinator.data.setdefault(f"{self._kind}_gain", {})[self._channel] = value
+            self.async_write_ha_state()
+        # 2) An das Gerät senden (fire-and-forget, kein Sofort-Refresh).
         if self._kind == "input":
             await self.coordinator.client.set_input_gain(self._channel, value)
         else:
             await self.coordinator.client.set_output_gain(self._channel, value)
-        await self.coordinator.async_request_refresh()

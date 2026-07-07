@@ -1,4 +1,10 @@
-"""Coordinator: fragt den Ist-Zustand des Geräts periodisch ab."""
+"""Coordinator: fragt den Ist-Zustand des Geräts periodisch ab.
+
+Robustheit (v2): Ein einzelner verpasster Poll darf die Oberfläche NICHT mehr
+leeren. Jeder der vier Teilwerte wird einzeln abgefragt; misslingt einer, bleibt
+der letzte gute Wert erhalten und die Entitäten bleiben verfügbar. Erst nach
+längerer echter Funkstille wird auf "nicht verfügbar" umgeschaltet.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +17,10 @@ from .const import DOMAIN, SCAN_INTERVAL
 from .integra import IntegraClient, IntegraError
 
 _LOGGER = logging.getLogger(__name__)
+
+# Nach so vielen aufeinanderfolgenden komplett fehlgeschlagenen Polls gilt das
+# Gerät als offline (bei 10 s Intervall ~1 Minute).
+_MAX_CONSECUTIVE_FAILS = 6
 
 
 class IntegraCoordinator(DataUpdateCoordinator):
@@ -33,15 +43,12 @@ class IntegraCoordinator(DataUpdateCoordinator):
         self.client = client
         self.outputs = outputs
         self.inputs = inputs
-        # Vom Gerät gelesene Kanalnamen, dienen als Default-Bezeichnung.
         self.device_names = device_names or {"input": {}, "output": {}}
+        # Letzter erfolgreich gelesener Zustand (bleibt bei Aussetzern erhalten).
+        self._last_good: dict = {}
+        self._fail_count = 0
 
     def channel_name(self, kind: str, channel: int, options: dict) -> str:
-        """Ermittelt den anzuzeigenden Kanalnamen.
-
-        Reihenfolge: 1) Override aus den Integrations-Optionen,
-        2) vom Gerät gelesener Name, 3) generischer Fallback.
-        """
         override = options.get(f"{kind}_name_{channel}")
         if override:
             return override
@@ -52,17 +59,41 @@ class IntegraCoordinator(DataUpdateCoordinator):
         return f"{label} {channel + 1}"
 
     async def _async_update_data(self) -> dict:
-        """Wird vom Coordinator periodisch aufgerufen."""
-        try:
-            data: dict = {}
-            if self.outputs:
-                last = self.outputs - 1
-                data["output_gain"] = await self.client.get_output_gains(0, last)
-                data["output_mute"] = await self.client.get_output_mutes(0, last)
-            if self.inputs:
-                last = self.inputs - 1
-                data["input_gain"] = await self.client.get_input_gains(0, last)
-                data["input_mute"] = await self.client.get_input_mutes(0, last)
-        except IntegraError as err:
-            raise UpdateFailed(f"Fehler beim Abfragen der Integra: {err}") from err
-        return data
+        """Periodischer Abruf mit Verlust-Toleranz.
+
+        Startet vom letzten guten Stand und überschreibt nur, was erfolgreich
+        gelesen wurde. So bleiben Fader stehen, wenn ein Paket verloren geht.
+        """
+        data: dict = {key: dict(val) for key, val in self._last_good.items()}
+        got_something = False
+
+        async def fetch(key: str, coro) -> None:
+            nonlocal got_something
+            try:
+                data[key] = await coro
+                got_something = True
+            except IntegraError as err:
+                _LOGGER.debug("Teilabruf '%s' fehlgeschlagen: %s", key, err)
+
+        if self.outputs:
+            last = self.outputs - 1
+            await fetch("output_gain", self.client.get_output_gains(0, last))
+            await fetch("output_mute", self.client.get_output_mutes(0, last))
+        if self.inputs:
+            last = self.inputs - 1
+            await fetch("input_gain", self.client.get_input_gains(0, last))
+            await fetch("input_mute", self.client.get_input_mutes(0, last))
+
+        if got_something:
+            self._fail_count = 0
+            self._last_good = data
+            return data
+
+        # Gar nichts empfangen -> zählen. Werte trotzdem halten, solange die
+        # Funkstille kurz ist; erst danach Gerät als offline melden.
+        self._fail_count += 1
+        if self._fail_count >= _MAX_CONSECUTIVE_FAILS:
+            raise UpdateFailed(
+                f"Gerät reagiert seit {self._fail_count} Polls nicht."
+            )
+        return self._last_good
