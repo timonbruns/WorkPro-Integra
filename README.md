@@ -91,7 +91,9 @@ Additionally (one per device):
 
 These functions use the binary protocol of the Work software (UDP **6001**),
 which runs in parallel to the ASCII protocol. Nothing has to be enabled on the
-device. All channel, band and preset numbers are **1-based**, exactly as shown in
+device. On start-up the integration logs in like the Work software (device info
++ full parameter image) and keeps the session alive; if the session drops (device
+restart, network outage) it logs in again automatically. All channel, band and preset numbers are **1-based**, exactly as shown in
 the Work software. Only the values you pass are changed.
 
 | Service | Fields |

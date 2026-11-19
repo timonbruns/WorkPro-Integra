@@ -15,6 +15,10 @@ Rahmen (alle Mehrbyte-Werte Little Endian)::
   Antworten des Geräts tragen KEINE eigene Prüfsumme, sondern spiegeln das
   ``chk`` der Anfrage – darüber lassen sich Antworten eindeutig zuordnen.
 * Antworten tragen ``cmd + 1``; SET (0x21) wird NICHT quittiert.
+* Sitzung: Die Integra beantwortet Keepalives (0x55) und leitet Änderungen
+  erst an einen Client weiter, nachdem er das komplette Speicherabbild gelesen
+  hat (alle Seiten via 0x11; nach der letzten Seite sendet das Gerät zusätzlich
+  0xA3). „Meter aus“ (0xAA 00) beendet die Sitzung. Am Gerät verifiziert.
 * Ein SET, das ein Client sendet, leitet die Integra 1:1 an die anderen
   angemeldeten Clients weiter. Darüber bekommt Home Assistant Änderungen aus
   der Herstellersoftware live mit.
@@ -102,7 +106,8 @@ MATRIX_POINT = 1
 
 # Nach dieser Zeit ohne gültiges Paket gilt die DSP-Verbindung als getrennt.
 _KEEPALIVE_INTERVAL = 2.0
-_OFFLINE_AFTER = 7.0
+_OFFLINE_AFTER = 7.0      # ohne Keepalive-Antwort gilt die Sitzung als beendet
+_LOGIN_RETRY = 10.0       # Mindestabstand zwischen zwei Anmeldeversuchen
 _REPLY_TIMEOUT = 1.0
 _RETRIES = 3
 
@@ -224,6 +229,8 @@ class IntegraDspClient:
     """Client für das DSP-Protokoll.
 
     * SET-Befehle werden sofort gesendet (fire-and-forget, wie DSP 1.5).
+    * Beim Start (und automatisch nach Sitzungsverlust) meldet sich der Client
+      an, indem er Geräteinfo und das komplette Speicherabbild liest.
     * Ein Keepalive alle 2 s hält die Sitzung offen; darüber meldet die Integra
       Änderungen anderer Clients (Push) an diesen Client.
     * Anfragen mit Antwort (Info, Preset, Speicherabbild) werden serialisiert
@@ -237,7 +244,12 @@ class IntegraDspClient:
         self._lock = asyncio.Lock()
         self._pending: tuple[int, int, asyncio.Future[Frame]] | None = None
         self._keepalive_task: asyncio.Task | None = None
-        self._last_seen = 0.0
+        self._last_seen = 0.0          # letztes gültiges Paket überhaupt
+        self._last_session = 0.0       # letzte Keepalive-Antwort / letzter Push / Anmeldung
+        self._last_login_try = 0.0
+        self._login_lock = asyncio.Lock()
+        self.info: dict | None = None
+        self.image: bytes | None = None
         self._push_listeners: list[Callable[[dict], None]] = []
         self._availability_listeners: list[Callable[[bool], None]] = []
         self._available = False
@@ -285,16 +297,38 @@ class IntegraDspClient:
             except Exception:  # pragma: no cover - Listener-Fehler isolieren
                 _LOGGER.exception("Fehler im Verfügbarkeits-Listener")
 
+    async def login(self) -> None:
+        """Öffnet eine Sitzung: Geräteinfo + komplettes Speicherabbild + Status."""
+        async with self._login_lock:
+            self._last_login_try = time.monotonic()
+            self.info = await self.get_info()
+            self.image = await self.read_image()
+            try:
+                await self._request(build_frame(CMD_STATUS, bytes(16)), CMD_STATUS + 1, retries=1)
+            except IntegraDspError:
+                _LOGGER.debug("Keine Statusantwort nach Anmeldung (unkritisch)")
+            self._last_session = time.monotonic()
+            _LOGGER.debug("DSP-Sitzung mit %s geöffnet (%s, FW %s)", self.host,
+                          self.info.get("name"), self.info.get("firmware"))
+
+    def _session_alive(self) -> bool:
+        return time.monotonic() - self._last_session <= _OFFLINE_AFTER
+
     async def _keepalive_loop(self) -> None:
         keepalive = build_frame(CMD_KEEPALIVE, bytes(16))
         while True:
+            if not self._session_alive():
+                self._set_available(False)
+                if time.monotonic() - self._last_login_try >= _LOGIN_RETRY:
+                    try:
+                        await self.login()
+                    except (IntegraDspError, OSError) as err:
+                        _LOGGER.debug("DSP-Anmeldung an %s fehlgeschlagen: %s", self.host, err)
             try:
                 self._send(keepalive)
             except IntegraDspError:
                 pass
             await asyncio.sleep(_KEEPALIVE_INTERVAL)
-            if time.monotonic() - self._last_seen > _OFFLINE_AFTER:
-                self._set_available(False)
 
     # --- Empfang ------------------------------------------------------
 
@@ -304,13 +338,19 @@ class IntegraDspClient:
             _LOGGER.debug("Ungültiges DSP-Paket verworfen: %s", data[:32].hex(" "))
             return
         self._last_seen = time.monotonic()
-        self._set_available(True)
+
+        if frame.cmd == CMD_KEEPALIVE:
+            self._last_session = self._last_seen
+            self._set_available(True)
+            return
 
         if frame.cmd == CMD_SET:
             if not frame.checksum_ok:
                 _LOGGER.debug("Weitergeleitetes SET mit falscher Prüfsumme verworfen")
                 return
             decoded = decode_set(frame.payload)
+            self._last_session = self._last_seen
+            self._set_available(True)
             if decoded is not None:
                 for cb in list(self._push_listeners):
                     try:
