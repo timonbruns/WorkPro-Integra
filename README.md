@@ -153,7 +153,7 @@ actions:
 - The protocol is undocumented and was reverse-engineered from network captures
   of WorkPro DSP 1.5 ↔ Integra 8S. Verified: input PEQ/compressor, output
   PEQ/HPF/LPF/delay, matrix crosspoint, preset recall. Not yet verified:
-  LPF slope, the meaning of PEQ bypass 0/1 and the PEQ filter-type parameter.
+  LPF slope and the PEQ filter-type parameter.
 - DSP values are write-only for now: HA does not read the current EQ/compressor
   values from the device yet (live changes arrive via the event above).
 - Integra 16+ with WorkPro DSP 3.0 uses the same transport but its module
