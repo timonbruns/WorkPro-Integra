@@ -144,6 +144,24 @@ def test_real_replies_echo_request_checksum():
 
 
 # --- Simuliertes Gerät -------------------------------------------------------
+DEFAULT_FREQ = [60, 125, 500, 1000, 2000, 4000, 8000, 16000]
+
+
+def make_image(eq=None):
+    """Speicherabbild wie von der Integra 8S (14954 Byte) mit Eingangs-EQs.
+
+    eq: {(Kanal, Band): (Freq, Gain_dB, Q)} und {(Kanal, 0): bypass}
+    """
+    img = bytearray(b"\xff" * 14954)
+    eq = eq or {}
+    for ch in range(1, 9):
+        base = ib.IMG_IN_EQ_BASE + ib.IMG_IN_EQ_STRIDE * (ch - 1)
+        struct.pack_into("<HH", img, base, int(eq.get((ch, 0), 1)), 8)
+        for b in range(1, 9):
+            f, g, q = eq.get((ch, b), (DEFAULT_FREQ[b - 1], 0.0, 0.71))
+            struct.pack_into("<HHHhH", img, base + 4 + 10 * (b - 1), 1, 6, f, round(g * 100), round(q * 100))
+    return img
+
 class FakeIntegra(asyncio.DatagramProtocol):
     """Antwortet wie die echte Integra (aus den Mitschnitten)."""
 
@@ -152,6 +170,8 @@ class FakeIntegra(asyncio.DatagramProtocol):
         self.clients = set()      # alle, die etwas gesendet haben
         self.sessions = set()     # angemeldet (komplettes Abbild gelesen)
         self.drop_next = 0
+        self.image = make_image()
+        self.presets = {}         # Preset-Index -> Abbild
 
     def connection_made(self, transport):
         self.t = transport
@@ -176,6 +196,9 @@ class FakeIntegra(asyncio.DatagramProtocol):
             if addr in self.sessions:
                 self.reply(ib.build_frame(ib.CMD_STATUS + 1, bytes(152)), f, addr)
         elif f.cmd == ib.CMD_RECALL:
+            idx = struct.unpack("<I", f.payload[:4])[0]
+            if idx in self.presets:
+                self.image = bytearray(self.presets[idx])
             self.reply(ib.build_frame(ib.CMD_RECALL + 1, f.payload), f, addr)
         elif f.cmd == ib.CMD_INFO:
             p = bytearray(360)
@@ -188,7 +211,7 @@ class FakeIntegra(asyncio.DatagramProtocol):
             self.reply(ib.build_frame(ib.CMD_INFO + 1, bytes(p), flags=2), f, addr)
         elif f.cmd == ib.CMD_READ_PAGE:
             page = f.page
-            body = bytes([page]) * (1008 if page < 14 else 842)
+            body = bytes(self.image[page * 1008:(page + 1) * 1008])
             if page == 14:                     # Abschluss wie am Gerät: erst 0xA3, dann Seite
                 self.reply(ib.build_frame(0xA3, bytes(16), pages=15, page=14), f, addr)
                 self.sessions.add(addr)
@@ -228,7 +251,9 @@ def test_fake_device_roundtrip():
 
         fake.drop_next = 1            # erste Anfrage geht verloren -> Wiederholung
         await ha.recall_preset(2)
-        assert fake.received[-1].payload == H("01000000")
+        recalls = [f for f in fake.received if f.cmd == ib.CMD_RECALL]
+        assert recalls[-1].payload == H("01000000")
+        assert fake.received[-1].cmd == ib.CMD_READ_PAGE   # danach Abbild neu gelesen
 
         img = await ha.read_image()
         assert len(img) == 14 * 1008 + 842 == 14954
@@ -277,6 +302,47 @@ def test_relogin_after_session_loss():
         c._last_login_try -= 60
         await asyncio.sleep(2.5)              # ein Keepalive-Zyklus -> Neuanmeldung
         assert fake.sessions and c.available
+        c.close()
+        t.close()
+
+    _run(run())
+
+
+def test_parse_input_eq_from_image():
+    img = make_image({(1, 3): (1908, 5.7, 0.71), (1, 0): 0, (2, 1): (66, -3.5, 2.0)})
+    st = ib.parse_input_eq(bytes(img), 8)
+    assert st[(1, 3, "frequency")] == 1908 and st[(1, 3, "gain")] == 5.7 and st[(1, 3, "q")] == 0.71
+    assert st[(1, 0, "bypass")] is False and st[(2, 0, "bypass")] is True
+    assert st[(2, 1, "frequency")] == 66 and st[(2, 1, "gain")] == -3.5 and st[(2, 1, "q")] == 2.0
+    assert len(st) == 8 * (1 + 8 * 3)
+
+
+def test_login_publishes_eq_and_recall_publishes_changes():
+    async def run():
+        t, fake, port = await _start_fake()
+        fake.image = make_image({(1, 3): (1908, 5.7, 0.71)})
+        fake.presets[1] = make_image({(1, 3): (1000, -2.0, 1.0), (1, 0): 0})
+        c = ib.IntegraDspClient("127.0.0.1", port)
+        c.input_count = 8
+        events = []
+        c.add_push_listener(events.append)
+        await c.connect()
+        await asyncio.sleep(0.5)
+        img_events = [e for e in events if e.get("source") == "image"]
+        assert len(img_events) == 8 * 25
+        assert {"channel": 1, "band": 3, "param": "gain", "value": 5.7} .items() <= next(
+            e for e in img_events if e["channel"] == 1 and e.get("band") == 3 and e["param"] == "gain").items()
+
+        events.clear()
+        await c.recall_preset(2)
+        changed = {(e["channel"], e.get("band", 0), e["param"]): e["value"] for e in events}
+        assert changed == {(1, 3, "frequency"): 1000, (1, 3, "gain"): -2.0, (1, 3, "q"): 1.0, (1, 0, "bypass"): False}
+
+        # eigene Änderungen werden mitgeführt -> kein erneutes Melden beim nächsten Lesen
+        events.clear()
+        c.set_peq_gain("input", 1, 3, -2.0)
+        await c.refresh_state()
+        assert events == []
         c.close()
         t.close()
 

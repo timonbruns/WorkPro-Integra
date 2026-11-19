@@ -103,7 +103,8 @@ the Work software. Only the values you pass are changed.
 | `work_integra.set_filter` | `channel` (output), `filter` (hpf/lpf), `frequency` (Hz), `slope` (dB/oct) |
 | `work_integra.set_delay` | `channel` (output), `delay` (ms, min. 1) |
 | `work_integra.set_matrix` | `input`, `output`, `enabled` |
-| `work_integra.recall_preset` | `preset` |
+| `work_integra.recall_preset` | `preset` (then re-reads the EQ) |
+| `work_integra.read_dsp` | `full` (report all values / only changes) |
 
 `device_id` is only needed when more than one Integra is set up.
 
@@ -212,9 +213,13 @@ actions:
 - The protocol is undocumented and was reverse-engineered from network captures
   of WorkPro DSP 1.5 ↔ Integra 8S. Verified: input PEQ/compressor, output
   PEQ/HPF/LPF/delay, matrix crosspoint, preset recall. Not yet verified:
-  LPF slope and the PEQ filter-type parameter.
-- DSP values are write-only for now: HA does not read the current EQ/compressor
-  values from the device yet (live changes arrive via the event above).
+  LPF slope and the PEQ filter-type parameter. PEQ bypass: 1 = bypassed.
+- **Input EQ is read from the device** (frequency, gain, Q, bypass of all
+  inputs) after start-up, after every preset recall and on demand via
+  `work_integra.read_dsp`; values arrive as `work_integra_dsp_changed` events
+  with `source: image`, so the same sync automation updates your helpers.
+- The compressor cannot be read back: its live values are not part of the
+  readable parameter image (only the state of the last loaded preset).
 - Integra 16+ with WorkPro DSP 3.0 uses the same transport but its module
   numbering has not been checked yet.
 

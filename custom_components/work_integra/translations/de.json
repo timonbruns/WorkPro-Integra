@@ -180,6 +180,20 @@
           "description": "Presetnummer, 1-basiert."
         }
       }
+    },
+    "read_dsp": {
+      "name": "DSP-Zustand lesen",
+      "description": "Liest den EQ aller Eingänge (Frequenz, Gain, Q, Bypass) von der Integra und meldet ihn über work_integra_dsp_changed – z. B. um Helfer abzugleichen.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Integra (nur nötig bei mehreren Geräten)."
+        },
+        "full": {
+          "name": "Alle Werte melden",
+          "description": "An: alle Werte melden. Aus: nur geänderte."
+        }
+      }
     }
   },
   "selector": {

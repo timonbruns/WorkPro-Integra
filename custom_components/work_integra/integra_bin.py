@@ -214,6 +214,57 @@ def decode_set(payload: bytes) -> dict | None:
     return {"kind": "unknown", **raw}
 
 
+# --- Speicherabbild: Eingangs-EQ ---------------------------------------------
+# Am Gerät verifiziert (Integra 8S, FW 30.2.3.3): Der Eingangs-PEQ steht im
+# Abbild als Live-Zustand. Je Eingang ein Block von 88 Byte:
+#   +0  u16  Bypass (1 = gebrückt)
+#   +2  u16  (unbekannt)
+#   +4  8 × Band à 10 Byte: u16 ?, u16 Typ, u16 Frequenz Hz, i16 Gain ×0,01 dB, u16 Q ×0,01
+# Der Kompressor steht NICHT live im Abbild (nur der Stand des zuletzt geladenen
+# Presets) und wird deshalb nicht ausgelesen.
+IMG_IN_EQ_BASE = 4882
+IMG_IN_EQ_STRIDE = 88
+IMG_EQ_BAND_STRIDE = 10
+IMG_EQ_BANDS = 8
+
+
+def parse_input_eq(image: bytes, inputs: int) -> dict[tuple, float | bool]:
+    """Liest Bypass und Bänder aller Eingangs-EQs aus dem Speicherabbild.
+
+    Schlüssel: (Kanal, Band, Parameter) – Band 0 für den Bypass des Kanals.
+    Unplausible Werte werden ausgelassen.
+    """
+    result: dict[tuple, float | bool] = {}
+    for ch in range(1, inputs + 1):
+        base = IMG_IN_EQ_BASE + IMG_IN_EQ_STRIDE * (ch - 1)
+        end = base + 4 + IMG_EQ_BAND_STRIDE * IMG_EQ_BANDS
+        if len(image) < end:
+            break
+        bypass = struct.unpack_from("<H", image, base)[0]
+        if bypass in (0, 1):
+            result[(ch, 0, "bypass")] = bool(bypass)
+        for band in range(1, IMG_EQ_BANDS + 1):
+            _a, _typ, freq, gain, q = struct.unpack_from(
+                "<HHHhH", image, base + 4 + IMG_EQ_BAND_STRIDE * (band - 1))
+            if 20 <= freq <= 20000:
+                result[(ch, band, "frequency")] = freq
+            if -3000 <= gain <= 3000:
+                result[(ch, band, "gain")] = gain / 100
+            if 1 <= q <= 10000:
+                result[(ch, band, "q")] = q / 100
+    return result
+
+
+def eq_change_event(key: tuple, value) -> dict:
+    """Baut aus einem Abbild-Wert eine Meldung im Format von decode_set."""
+    ch, band, param = key
+    event = {"kind": "peq", "side": "input", "channel": ch, "param": param,
+             "value": value, "source": "image"}
+    if band:
+        event["band"] = band
+    return event
+
+
 class _DspProtocol(asyncio.DatagramProtocol):
     def __init__(self, client: IntegraDspClient) -> None:
         self._client = client
@@ -250,6 +301,8 @@ class IntegraDspClient:
         self._login_lock = asyncio.Lock()
         self.info: dict | None = None
         self.image: bytes | None = None
+        self.input_count = 16           # wird von der Integration gesetzt
+        self.eq_state: dict[tuple, float | bool] = {}
         self._push_listeners: list[Callable[[dict], None]] = []
         self._availability_listeners: list[Callable[[bool], None]] = []
         self._available = False
@@ -310,6 +363,22 @@ class IntegraDspClient:
             self._last_session = time.monotonic()
             _LOGGER.debug("DSP-Sitzung mit %s geöffnet (%s, FW %s)", self.host,
                           self.info.get("name"), self.info.get("firmware"))
+            self._publish_image_state()
+
+    async def refresh_state(self) -> None:
+        """Liest das Abbild neu (z. B. nach Preset-Abruf) und meldet Änderungen."""
+        self.image = await self.read_image()
+        self._publish_image_state()
+
+    def _publish_image_state(self) -> None:
+        """Meldet EQ-Werte aus dem Abbild, die sich gegenüber dem letzten Stand geändert haben."""
+        if not self.image:
+            return
+        new = parse_input_eq(self.image, self.input_count)
+        for key, value in new.items():
+            if self.eq_state.get(key) != value:
+                self._notify_push(eq_change_event(key, value))
+        self.eq_state = new
 
     def _session_alive(self) -> bool:
         return time.monotonic() - self._last_session <= _OFFLINE_AFTER
@@ -352,6 +421,7 @@ class IntegraDspClient:
             self._last_session = self._last_seen
             self._set_available(True)
             if decoded is not None:
+                self._track_eq(decoded)
                 self._notify_push(decoded)
             return
 
@@ -389,6 +459,9 @@ class IntegraDspClient:
     def send_set(self, module: int, param: int, w1: int, w2: int = 0) -> None:
         """Sendet einen rohen SET-Befehl."""
         self._send(build_set(module, param, int(w1), int(w2)))
+        decoded = decode_set(struct.pack("<HHhh", module, param, int(w1), int(w2)))
+        if decoded is not None:
+            self._track_eq(decoded)
 
     # --- Abfragen -----------------------------------------------------
 
@@ -424,6 +497,11 @@ class IntegraDspClient:
         if preset < 1:
             raise ValueError("Preset beginnt bei 1")
         await self._request(build_frame(CMD_RECALL, struct.pack("<I", preset - 1)), CMD_RECALL + 1)
+        await asyncio.sleep(0.5)  # Gerät lädt das Preset
+        try:
+            await self.refresh_state()
+        except IntegraDspError as err:
+            _LOGGER.debug("Abbild nach Preset-Abruf nicht lesbar: %s", err)
 
     # --- PEQ ----------------------------------------------------------
 
@@ -505,6 +583,11 @@ class IntegraDspClient:
         decoded = decode_set(struct.pack("<HHhh", MOD_MATRIX, MATRIX_POINT, point, 1 if on else 0))
         if decoded is not None:
             self._notify_push({**decoded, "local": True})
+
+    def _track_eq(self, d: dict) -> None:
+        if (d.get("kind") == "peq" and d.get("side") == "input"
+                and d["param"] in ("frequency", "gain", "q", "bypass")):
+            self.eq_state[(d["channel"], d.get("band", 0), d["param"])] = d["value"]
 
     def _notify_push(self, decoded: dict) -> None:
         for cb in list(self._push_listeners):

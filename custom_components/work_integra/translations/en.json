@@ -180,6 +180,20 @@
           "description": "Preset number, 1-based."
         }
       }
+    },
+    "read_dsp": {
+      "name": "Read DSP state",
+      "description": "Reads the EQ of all inputs (frequency, gain, Q, bypass) from the Integra and reports it via work_integra_dsp_changed – e.g. to sync helpers.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Integra (only needed with several devices)."
+        },
+        "full": {
+          "name": "Report all values",
+          "description": "On: report all values. Off: only changed ones."
+        }
+      }
     }
   },
   "selector": {

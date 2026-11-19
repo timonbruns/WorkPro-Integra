@@ -12,7 +12,7 @@
  * Attack/Release über die Regler unter der Grafik.
  */
 
-const COMP_VERSION = "1.4.1";
+const COMP_VERSION = "1.5.0";
 const C_T = "#ff9f1a";   // Threshold
 const C_R = "#2ee6d6";   // Ratio
 const C_A = "#3d9bff";   // Attack
