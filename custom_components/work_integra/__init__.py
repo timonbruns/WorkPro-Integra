@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -38,11 +39,38 @@ PLATFORMS: list[Platform] = [
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
+EQ_CARD_FILE = Path(__file__).parent / "frontend" / "work-integra-eq-card.js"
+EQ_CARD_URL = f"/{DOMAIN}/work-integra-eq-card.js"
+
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Registriert die Dienste einmalig für alle Integra-Geräte."""
+    """Registriert die Dienste und die EQ-Karte einmalig für alle Integra-Geräte."""
     async_setup_services(hass)
+    await _async_register_frontend(hass)
     return True
+
+
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Liefert die Lovelace-Karte custom:work-integra-eq-card mit aus.
+
+    Kein manueller Ressourcen-Eintrag nötig: Die Datei wird über HA bereitgestellt
+    und automatisch im Frontend geladen (Versionsparameter gegen Browser-Cache).
+    """
+    if getattr(hass, "http", None) is None or "frontend" not in hass.config.components:
+        _LOGGER.debug("Frontend nicht geladen – EQ-Karte wird nicht registriert")
+        return
+    from homeassistant.components.frontend import add_extra_js_url
+    from homeassistant.components.http import StaticPathConfig
+    from homeassistant.loader import async_get_integration
+
+    version = (await async_get_integration(hass, DOMAIN)).version
+    try:
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(EQ_CARD_URL, str(EQ_CARD_FILE), True)]
+        )
+    except RuntimeError:
+        _LOGGER.debug("Statischer Pfad %s bereits registriert", EQ_CARD_URL)
+    add_extra_js_url(hass, f"{EQ_CARD_URL}?v={version}")
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
