@@ -18,7 +18,7 @@
  * Regler unter der Grafik.
  */
 
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const COLORS = ["#ff4d4d", "#ff9f1a", "#ffd60a", "#4cd964", "#2ee6d6", "#3d9bff", "#9b6bff", "#ff5fd2"];
 const DEFAULT_FREQ = [60, 125, 500, 1000, 2000, 4000, 8000, 16000];
 const F_MIN = 20, F_MAX = 20000, Q_MIN = 0.1, Q_MAX = 20;
@@ -115,11 +115,11 @@ class WorkIntegraEqCard extends HTMLElement {
     const root = this.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>
-        :host { display: block; }
-        ha-card { background: #0b0d10; color: #d7dde4; border: 1px solid #1d232b; overflow: hidden;
+        :host { display: block; height: 100%; }
+        ha-card { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; background: #0b0d10; color: #d7dde4; border: 1px solid #1d232b; overflow: hidden;
           font-family: var(--ha-font-family-body, Roboto, sans-serif); }
         .head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 6px; }
-        .title { font-size: 15px; font-weight: 600; letter-spacing: .3px; }
+        .title { font-size: 15px; font-weight: 600; letter-spacing: .3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 8px; }
         .bypass { border: 1px solid #39424d; background: #151a20; color: #c7ced6; border-radius: 6px;
           padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; letter-spacing: .5px; }
         .bypass.on { background: #ffd60a; border-color: #ffd60a; color: #111; }
@@ -129,7 +129,7 @@ class WorkIntegraEqCard extends HTMLElement {
         .chip { flex: 1 1 0; min-width: 34px; border-radius: 6px; padding: 6px 0; text-align: center; cursor: pointer;
           font-size: 12px; font-weight: 700; background: #151a20; border: 1px solid #262d36; color: #9aa4af; }
         .chip.sel { color: #0b0d10; }
-        .detail { padding: 6px 14px 14px; display: grid; grid-template-columns: 70px 1fr 78px; gap: 8px 10px; align-items: center; }
+        .detail { margin-top: auto; padding: 6px 14px 14px; display: grid; grid-template-columns: 70px 1fr 78px; gap: 8px 10px; align-items: center; }
         .detail .lbl { font-size: 12px; color: #8b95a1; text-transform: uppercase; letter-spacing: .6px; }
         .detail .val { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; color: #e9eef3; }
         input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; background: transparent; }
@@ -327,9 +327,11 @@ class WorkIntegraEqCard extends HTMLElement {
       <feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>`);
     parts.push(`<rect x="${m.l}" y="${m.t}" width="${g.pw}" height="${g.ph}" fill="#06080a" stroke="#1d232b"/>`);
     GRID_MINOR.forEach((f) => parts.push(`<line x1="${g.x(f)}" x2="${g.x(f)}" y1="${m.t}" y2="${H - m.b}" stroke="#151a20"/>`));
+    const narrow = g.pw < 380;
     GRID_MAJOR.forEach(([f, t]) => {
       const x = g.x(f);
       parts.push(`<line x1="${x}" x2="${x}" y1="${m.t}" y2="${H - m.b}" stroke="#232a33"/>`);
+      if (narrow && ![20, 100, 1000, 10000].includes(f)) return;  // schmale Karte: weniger Beschriftung
       const anchor = f === F_MIN ? "start" : f === F_MAX ? "end" : "middle";
       parts.push(`<text x="${x}" y="${H - 6}" fill="#6f7a86" font-size="10" text-anchor="${anchor}">${t}</text>`);
     });
