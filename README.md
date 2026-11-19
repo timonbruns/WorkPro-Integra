@@ -117,6 +117,31 @@ data:
   gain: 3
 ```
 
+### Equalizer card
+
+The integration ships a Lovelace card with a frequency-response graph and
+draggable band points. It is loaded automatically – no resource entry needed.
+
+```yaml
+type: custom:work-integra-eq-card
+title: Kanal 1 – Equalizer
+prefix: in1        # input_number.in1_eq_band_<1..8>_{gain,frequenz,q} + input_boolean.in1_eq_bypass
+db_range: 15       # optional, ±dB of the graph
+height: 300        # optional, px
+```
+
+- Drag a band point: left/right = frequency, up/down = gain. Double-click/tap = 0 dB.
+- Band chips 1–8 select a band; the sliders below set frequency, gain and Q.
+- Sum curve plus each band's own curve in its colour; BYPASS button toggles the EQ.
+- Instead of `prefix`, bands can be listed explicitly:
+  `bands: [{gain: input_number.a, frequency: input_number.b, q: input_number.c}, …]`
+  and `bypass: input_boolean.x`.
+
+The card writes to helper entities; an automation forwards helper changes to
+`work_integra.set_peq` (see the example under *Live updates*). The curve is
+calculated as peaking filters (RBJ cookbook, 48 kHz) – shelf/pass filter types
+are not modelled yet.
+
 ### Live updates
 
 The Integra forwards every DSP change made by another client (e.g. WorkPro DSP

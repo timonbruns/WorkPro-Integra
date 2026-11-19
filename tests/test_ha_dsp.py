@@ -149,3 +149,33 @@ async def test_connectivity_goes_off_when_device_silent(hass, fake_device):
     assert hass.states.get("binary_sensor.integra_127_0_0_1_dsp_verbindung").state == "off"
     assert hass.states.get("select.integra_127_0_0_1_preset").state == "unavailable"
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_eq_card_is_served_and_registered(hass):
+    """Die EQ-Karte wird als statische Datei bereitgestellt und im Frontend geladen."""
+    from unittest.mock import MagicMock
+
+    import custom_components.work_integra as wi
+
+    assert wi.EQ_CARD_FILE.is_file()
+    http = MagicMock()
+    http.async_register_static_paths = AsyncMock()
+    hass.http = http
+    hass.config.components.add("frontend")
+    with patch("homeassistant.components.frontend.add_extra_js_url") as add_js:
+        await wi._async_register_frontend(hass)
+    cfg = http.async_register_static_paths.await_args.args[0][0]
+    assert cfg.url_path == "/work_integra/work-integra-eq-card.js"
+    assert cfg.path == str(wi.EQ_CARD_FILE)
+    url = add_js.call_args.args[1]
+    assert url.startswith("/work_integra/work-integra-eq-card.js?v=")
+
+
+async def test_eq_card_skipped_without_frontend(hass):
+    import custom_components.work_integra as wi
+
+    if "frontend" in hass.config.components:
+        hass.config.components.remove("frontend")
+    with patch("homeassistant.components.frontend.add_extra_js_url") as add_js:
+        await wi._async_register_frontend(hass)
+    add_js.assert_not_called()
