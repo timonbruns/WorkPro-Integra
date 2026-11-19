@@ -81,12 +81,12 @@ class WorkIntegraCompCard extends HTMLElement {
           background: #0b0d10; color: #d7dde4; border: 1px solid #1d232b; overflow: hidden;
           font-family: var(--ha-font-family-body, Roboto, sans-serif); }
         .head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 6px; min-height: 29px; }
-        .title { font-size: 15px; font-weight: 600; letter-spacing: .3px; }
-        .gr { font-size: 12px; color: #8b95a1; font-variant-numeric: tabular-nums; }
+        .title { font-size: 15px; font-weight: 600; letter-spacing: .3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 8px; }
+        .gr { font-size: 12px; color: #8b95a1; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .graph { margin: 0 10px; }
         svg { display: block; width: 100%; touch-action: none; user-select: none; cursor: crosshair; }
         .chips { display: flex; gap: 6px; padding: 10px 12px 4px; }
-        .chip { flex: 1 1 0; border-radius: 6px; padding: 6px 0; text-align: center; font-size: 12px; font-weight: 700;
+        .chip { flex: 1 1 0; min-width: 0; border-radius: 6px; padding: 6px 2px; text-align: center; font-size: 12px; font-weight: 700;
           background: #151a20; border: 1px solid var(--c); color: var(--c); font-variant-numeric: tabular-nums;
           white-space: nowrap; overflow: hidden; }
         .detail { padding: 6px 14px 14px; display: grid; grid-template-columns: 80px 1fr 78px; gap: 8px 10px; align-items: center; margin-top: auto; }
@@ -247,11 +247,12 @@ class WorkIntegraCompCard extends HTMLElement {
     this._el.title.textContent = this._config.title;
     const { threshold: T, ratio: R, attack: A, release: Rel } = this._v;
     const gr = -(this._out(DB_MAX) - DB_MAX);
-    this._el.gr.textContent = `max. Reduktion ${gr.toFixed(1)} dB`;
-    this._el.ct.textContent = `THR ${T.toFixed(1)}`;
+    this._el.gr.textContent = `GR max ${gr.toFixed(1)} dB`;
+    this._el.gr.title = "maximale Pegelreduktion bei 0 dB Eingang";
+    this._el.ct.textContent = `${T.toFixed(1)} dB`;
     this._el.cr.textContent = `${R.toFixed(1)}:1`;
-    this._el.ca.textContent = `ATT ${fmtMs(A)}`;
-    this._el.crel.textContent = `REL ${fmtMs(Rel)}`;
+    this._el.ca.textContent = fmtMs(A);
+    this._el.crel.textContent = fmtMs(Rel);
     const active = this.shadowRoot.activeElement;
     const set = (el, v) => { if (active !== el) el.value = v; };
     set(this._el.st, T);
@@ -279,7 +280,7 @@ class WorkIntegraCompCard extends HTMLElement {
       const major = d % 12 === 0;
       parts.push(`<line x1="${g.x(d)}" x2="${g.x(d)}" y1="${m.t}" y2="${H - m.b}" stroke="${major ? "#232a33" : "#151a20"}"/>`);
       parts.push(`<line x1="${m.l}" x2="${W - m.r}" y1="${g.y(d)}" y2="${g.y(d)}" stroke="${major ? "#232a33" : "#151a20"}"/>`);
-      if (major) {
+      if (major && !(g.pw < 260 && d % 24 !== 0 && d !== DB_MAX)) {
         parts.push(`<text x="${g.x(d)}" y="${H - 6}" fill="#6f7a86" font-size="10" text-anchor="${d === DB_MIN ? "start" : d === DB_MAX ? "end" : "middle"}">${d}</text>`);
         parts.push(`<text x="${m.l - 5}" y="${g.y(d) + 3.5}" fill="#6f7a86" font-size="10" text-anchor="end">${d}</text>`);
       }

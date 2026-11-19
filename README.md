@@ -153,8 +153,9 @@ height: 300        # same height as the EQ card -> both fit side by side
 
 Transfer curve (input vs. output, −60 … 0 dB) in the same console look: drag
 **T** to set the threshold, drag **R** to set the ratio; attack and release (and
-fine values) via the sliders. Both cards stretch to the row height, so with
-`grid_options: {columns: 6}` the EQ and the compressor sit side by side.
+fine values) via the sliders. Both cards stretch to the row height. Put them in a
+section with `column_span: 2` and give each card `grid_options: {columns: 12}` –
+they sit side by side on wide screens and stack on narrow ones.
 
 ### Routing matrix
 
