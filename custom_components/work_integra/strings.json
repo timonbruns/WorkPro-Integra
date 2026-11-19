@@ -8,7 +8,8 @@
           "host": "IP-Adresse",
           "port": "UDP-Port",
           "outputs": "Anzahl Output-Kanäle",
-          "inputs": "Anzahl Input-Kanäle"
+          "inputs": "Anzahl Input-Kanäle",
+          "dsp_port": "UDP-Port DSP-Protokoll (EQ/Presets)"
         }
       }
     },
@@ -28,6 +29,170 @@
       "outputs": {
         "title": "Ausgänge benennen",
         "description": "Optionaler Name je Ausgang (0-basiert: output_name_0 = Ausgang 1). Vorausgefüllt mit dem Gerätenamen."
+      }
+    }
+  },
+  "services": {
+    "set_peq": {
+      "name": "PEQ einstellen",
+      "description": "Setzt ein Band des parametrischen EQs eines Ein- oder Ausgangs. Nur angegebene Werte werden geändert.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Integra (nur nötig bei mehreren Geräten)."
+        },
+        "side": {
+          "name": "Seite",
+          "description": "Eingang oder Ausgang."
+        },
+        "channel": {
+          "name": "Kanal",
+          "description": "Kanalnummer, 1-basiert."
+        },
+        "band": {
+          "name": "Band",
+          "description": "EQ-Band, 1-basiert."
+        },
+        "frequency": {
+          "name": "Frequenz",
+          "description": "Mittenfrequenz in Hz."
+        },
+        "gain": {
+          "name": "Verstärkung",
+          "description": "Gain des Bandes in dB."
+        },
+        "q": {
+          "name": "Güte (Q)",
+          "description": "Q-Faktor des Bandes."
+        },
+        "bypass": {
+          "name": "Bypass",
+          "description": "EQ des Kanals überbrücken."
+        }
+      }
+    },
+    "set_compressor": {
+      "name": "Kompressor einstellen",
+      "description": "Setzt den Kompressor eines Eingangs. Nur angegebene Werte werden geändert.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Integra (nur nötig bei mehreren Geräten)."
+        },
+        "channel": {
+          "name": "Eingang",
+          "description": "Eingangsnummer, 1-basiert."
+        },
+        "threshold": {
+          "name": "Threshold",
+          "description": "Einsatzschwelle in dB."
+        },
+        "ratio": {
+          "name": "Ratio",
+          "description": "Kompressionsverhältnis, z. B. 2 für 2:1."
+        },
+        "attack": {
+          "name": "Attack",
+          "description": "Ansprechzeit in ms."
+        },
+        "release": {
+          "name": "Release",
+          "description": "Rücklaufzeit in ms."
+        }
+      }
+    },
+    "set_filter": {
+      "name": "Hoch-/Tiefpass einstellen",
+      "description": "Setzt Frequenz und/oder Flankensteilheit des Hoch- oder Tiefpasses eines Ausgangs.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Integra (nur nötig bei mehreren Geräten)."
+        },
+        "channel": {
+          "name": "Ausgang",
+          "description": "Ausgangsnummer, 1-basiert."
+        },
+        "filter": {
+          "name": "Filter",
+          "description": "Hochpass oder Tiefpass."
+        },
+        "frequency": {
+          "name": "Frequenz",
+          "description": "Eckfrequenz in Hz."
+        },
+        "slope": {
+          "name": "Flanke",
+          "description": "Flankensteilheit in dB/Oktave."
+        }
+      }
+    },
+    "set_delay": {
+      "name": "Delay einstellen",
+      "description": "Setzt das Delay eines Ausgangs (Minimum 1 ms).",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Integra (nur nötig bei mehreren Geräten)."
+        },
+        "channel": {
+          "name": "Ausgang",
+          "description": "Ausgangsnummer, 1-basiert."
+        },
+        "delay": {
+          "name": "Delay",
+          "description": "Verzögerung in ms."
+        }
+      }
+    },
+    "set_matrix": {
+      "name": "Matrix-Kreuzpunkt schalten",
+      "description": "Schaltet einen Kreuzpunkt der Routing-Matrix.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Integra (nur nötig bei mehreren Geräten)."
+        },
+        "input": {
+          "name": "Eingang",
+          "description": "Eingangsnummer, 1-basiert."
+        },
+        "output": {
+          "name": "Ausgang",
+          "description": "Ausgangsnummer, 1-basiert."
+        },
+        "enabled": {
+          "name": "Aktiv",
+          "description": "Kreuzpunkt ein- oder ausschalten."
+        }
+      }
+    },
+    "recall_preset": {
+      "name": "Preset abrufen",
+      "description": "Ruft ein gespeichertes Preset der Integra ab.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Integra (nur nötig bei mehreren Geräten)."
+        },
+        "preset": {
+          "name": "Preset",
+          "description": "Presetnummer, 1-basiert."
+        }
+      }
+    }
+  },
+  "selector": {
+    "side": {
+      "options": {
+        "input": "Eingang",
+        "output": "Ausgang"
+      }
+    },
+    "filter": {
+      "options": {
+        "hpf": "Hochpass",
+        "lpf": "Tiefpass"
       }
     }
   }

@@ -1,0 +1,208 @@
+set_peq:
+  fields:
+    device_id:
+      selector:
+        device:
+          integration: work_integra
+    side:
+      required: true
+      default: output
+      selector:
+        select:
+          options:
+            - input
+            - output
+          translation_key: side
+    channel:
+      required: true
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 16
+          mode: box
+    band:
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 31
+          mode: box
+    frequency:
+      selector:
+        number:
+          min: 20
+          max: 20000
+          step: 1
+          unit_of_measurement: Hz
+          mode: box
+    gain:
+      selector:
+        number:
+          min: -24
+          max: 24
+          step: 0.1
+          unit_of_measurement: dB
+          mode: slider
+    q:
+      selector:
+        number:
+          min: 0.1
+          max: 100
+          step: 0.01
+          mode: box
+    bypass:
+      selector:
+        boolean:
+
+set_compressor:
+  fields:
+    device_id:
+      selector:
+        device:
+          integration: work_integra
+    channel:
+      required: true
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 16
+          mode: box
+    threshold:
+      selector:
+        number:
+          min: -90
+          max: 20
+          step: 0.1
+          unit_of_measurement: dB
+          mode: slider
+    ratio:
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 0.1
+          mode: box
+    attack:
+      selector:
+        number:
+          min: 1
+          max: 30000
+          unit_of_measurement: ms
+          mode: box
+    release:
+      selector:
+        number:
+          min: 1
+          max: 30000
+          unit_of_measurement: ms
+          mode: box
+
+set_filter:
+  fields:
+    device_id:
+      selector:
+        device:
+          integration: work_integra
+    channel:
+      required: true
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 16
+          mode: box
+    filter:
+      required: true
+      default: hpf
+      selector:
+        select:
+          options:
+            - hpf
+            - lpf
+          translation_key: filter
+    frequency:
+      selector:
+        number:
+          min: 20
+          max: 20000
+          unit_of_measurement: Hz
+          mode: box
+    slope:
+      selector:
+        select:
+          options:
+            - "6"
+            - "12"
+            - "18"
+            - "24"
+            - "36"
+            - "48"
+
+set_delay:
+  fields:
+    device_id:
+      selector:
+        device:
+          integration: work_integra
+    channel:
+      required: true
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 16
+          mode: box
+    delay:
+      required: true
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 30000
+          unit_of_measurement: ms
+          mode: box
+
+set_matrix:
+  fields:
+    device_id:
+      selector:
+        device:
+          integration: work_integra
+    input:
+      required: true
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 16
+          mode: box
+    output:
+      required: true
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 16
+          mode: box
+    enabled:
+      required: true
+      default: true
+      selector:
+        boolean:
+
+recall_preset:
+  fields:
+    device_id:
+      selector:
+        device:
+          integration: work_integra
+    preset:
+      required: true
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 16
+          mode: box

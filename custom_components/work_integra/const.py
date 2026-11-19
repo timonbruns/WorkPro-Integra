@@ -12,6 +12,15 @@ CONF_OUTPUTS = "outputs"
 CONF_INPUTS = "inputs"
 
 DEFAULT_PORT = 50000
+
+# Binäres DSP-Protokoll (EQ, Kompressor, Filter, Delay, Matrix, Presets).
+CONF_DSP_PORT = "dsp_port"
+DEFAULT_DSP_PORT = 6001
+PRESET_COUNT = 16  # DSP-Controller: 16 Preset-Speicherplätze
+
+# Event bei jeder über das DSP-Protokoll gemeldeten Parameteränderung
+# (z. B. wenn jemand in WorkPro DSP 1.5 einen EQ verstellt).
+EVENT_DSP_CHANGED = "work_integra_dsp_changed"
 DEFAULT_OUTPUTS = 16  # Integra 16+ hat 16 Output-Kanäle
 DEFAULT_INPUTS = 16   # ... und 16 Input-Kanäle
 

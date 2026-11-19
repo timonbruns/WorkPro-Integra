@@ -17,9 +17,14 @@ Fast, local UDP control — no cloud required.
 - Mute for every input and output channel as a `switch`.
 - Channel names are read from the device and used to label the entities.
 - Rename any channel later via the integration's **Configure** dialog.
+- **DSP control (new in 1.2.0):** parametric EQ, input compressor, output
+  high-/low-pass, output delay, routing matrix and preset recall via services.
+- **Preset select** entity and a **live change event** when someone edits the
+  DSP in the Work software.
 - Fully local communication over UDP — no cloud, no account.
 
-Tested with the **Work Pro Integra 16+** (16 inputs, 16 outputs).
+Gain/mute tested with the **Work Pro Integra 16+**; DSP control tested with the
+**Integra 8S** (firmware 30.2.3.3).
 
 ## Requirements
 
@@ -75,6 +80,83 @@ With 16 inputs and 16 outputs that is 64 entities, all grouped under a single
 device. Entity names follow the channel names (e.g. *Kitchen Volume*,
 *Kitchen Mute*).
 
+Additionally (one per device):
+
+| Platform | Entity | Notes |
+| --- | --- | --- |
+| `select` | Preset | Recalls preset 1–16. Shows the preset last recalled from HA (the device does not report its active preset). |
+| `binary_sensor` | DSP-Verbindung | Diagnostic: on while the device answers the DSP keepalive on UDP 6001. |
+
+## DSP control (EQ, compressor, filters, delay, matrix, presets)
+
+These functions use the binary protocol of the Work software (UDP **6001**),
+which runs in parallel to the ASCII protocol. Nothing has to be enabled on the
+device. All channel, band and preset numbers are **1-based**, exactly as shown in
+the Work software. Only the values you pass are changed.
+
+| Service | Fields |
+| --- | --- |
+| `work_integra.set_peq` | `side` (input/output), `channel`, `band`, `frequency` (Hz), `gain` (dB), `q`, `bypass` |
+| `work_integra.set_compressor` | `channel` (input), `threshold` (dB), `ratio`, `attack` (ms), `release` (ms) |
+| `work_integra.set_filter` | `channel` (output), `filter` (hpf/lpf), `frequency` (Hz), `slope` (dB/oct) |
+| `work_integra.set_delay` | `channel` (output), `delay` (ms, min. 1) |
+| `work_integra.set_matrix` | `input`, `output`, `enabled` |
+| `work_integra.recall_preset` | `preset` |
+
+`device_id` is only needed when more than one Integra is set up.
+
+```yaml
+# Example: "Bass" for output 1 via PEQ band 1 (set up as a low shelf in the Work software)
+action: work_integra.set_peq
+data:
+  side: output
+  channel: 1
+  band: 1
+  gain: 3
+```
+
+### Live updates
+
+The Integra forwards every DSP change made by another client (e.g. WorkPro DSP
+1.5 on a laptop) to Home Assistant. Each change fires the event
+`work_integra_dsp_changed`, e.g.:
+
+```yaml
+event_type: work_integra_dsp_changed
+data:
+  config_entry_id: 01J...
+  kind: peq          # peq | compressor | hpf | lpf | delay | matrix | unknown
+  side: input
+  channel: 1
+  band: 2
+  param: gain
+  value: -4.5
+```
+
+Use it to keep `input_number` helpers in sync with the device:
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: work_integra_dsp_changed
+    event_data: {kind: peq, side: output, channel: 1, band: 1, param: gain}
+actions:
+  - action: input_number.set_value
+    target: {entity_id: input_number.ls_vorne_bass}
+    data: {value: "{{ trigger.event.data.value }}"}
+```
+
+### Limitations (DSP part)
+
+- The protocol is undocumented and was reverse-engineered from network captures
+  of WorkPro DSP 1.5 ↔ Integra 8S. Verified: input PEQ/compressor, output
+  PEQ/HPF/LPF/delay, matrix crosspoint, preset recall. Not yet verified:
+  LPF slope, the meaning of PEQ bypass 0/1 and the PEQ filter-type parameter.
+- DSP values are write-only for now: HA does not read the current EQ/compressor
+  values from the device yet (live changes arrive via the event above).
+- Integra 16+ with WorkPro DSP 3.0 uses the same transport but its module
+  numbering has not been checked yet.
+
 ## Notes & tuning
 
 - **Gain range:** output gain is −72 … +12 dB. Input gain uses the same range by
@@ -92,16 +174,31 @@ The integration uses the documented ASCII control protocol over UDP
 (e.g. `set:output#gain#0#-6.0`, `get:input#mute#0-15`). The client lives in
 `custom_components/work_integra/integra.py` and can be used standalone.
 
-The device's parametric EQ, compressor and routing matrix are only reachable via
-the binary protocol and are not implemented yet. EQ presets can be switched
-indirectly by recalling scenes.
+EQ, compressor, filters, delay, matrix and presets use the binary protocol on
+UDP 6001 (`custom_components/work_integra/integra_bin.py`, also usable
+standalone). Frame: `A5 5A | len u16 | pages u16 | page u16 | cmd | chk | 6×00 |
+payload`, checksum = (sum of all other bytes + 1) & 0xFF; replies echo the
+request's checksum byte. A SET is `module u16 | param u16 | w1 i16 | w2 i16`.
+
+## Tests
+
+```bash
+pip install pytest-homeassistant-custom-component
+pytest
+```
+
+The client tests compare every generated frame byte-for-byte with frames
+captured from the Work software; the HA tests run against a simulated Integra
+on localhost.
 
 ## Roadmap
 
-- Scene/preset recall as a `select` entity
+- Read current DSP values from the device's parameter image (state for EQ entities)
+- Optional EQ/compressor `number` entities
+- Level meters via the binary meter stream
 - System master mute
 - Phantom power (48 V) per input
-- Optional full EQ control via the binary protocol
+- Verify module numbering on the Integra 16+ / DSP 3.0
 
 ## License
 
