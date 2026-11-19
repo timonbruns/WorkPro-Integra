@@ -8,7 +8,8 @@
           "host": "IP address",
           "port": "UDP port",
           "outputs": "Number of output channels",
-          "inputs": "Number of input channels"
+          "inputs": "Number of input channels",
+          "dsp_port": "UDP port DSP protocol (EQ/presets)"
         }
       }
     },
@@ -28,6 +29,170 @@
       "outputs": {
         "title": "Name the outputs",
         "description": "Optional name per output (0-based: output_name_0 = output 1). Pre-filled with the device name."
+      }
+    }
+  },
+  "services": {
+    "set_peq": {
+      "name": "Set PEQ",
+      "description": "Sets one band of an input's or output's parametric EQ. Only the given values are changed.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Integra (only needed with several devices)."
+        },
+        "side": {
+          "name": "Side",
+          "description": "Input or output."
+        },
+        "channel": {
+          "name": "Channel",
+          "description": "Channel number, 1-based."
+        },
+        "band": {
+          "name": "Band",
+          "description": "EQ band, 1-based."
+        },
+        "frequency": {
+          "name": "Frequency",
+          "description": "Centre frequency in Hz."
+        },
+        "gain": {
+          "name": "Gain",
+          "description": "Band gain in dB."
+        },
+        "q": {
+          "name": "Q",
+          "description": "Q factor of the band."
+        },
+        "bypass": {
+          "name": "Bypass",
+          "description": "Bypass the channel's EQ."
+        }
+      }
+    },
+    "set_compressor": {
+      "name": "Set compressor",
+      "description": "Sets an input's compressor. Only the given values are changed.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Integra (only needed with several devices)."
+        },
+        "channel": {
+          "name": "Input",
+          "description": "Input number, 1-based."
+        },
+        "threshold": {
+          "name": "Threshold",
+          "description": "Threshold in dB."
+        },
+        "ratio": {
+          "name": "Ratio",
+          "description": "Compression ratio, e.g. 2 for 2:1."
+        },
+        "attack": {
+          "name": "Attack",
+          "description": "Attack time in ms."
+        },
+        "release": {
+          "name": "Release",
+          "description": "Release time in ms."
+        }
+      }
+    },
+    "set_filter": {
+      "name": "Set high/low-pass",
+      "description": "Sets frequency and/or slope of an output's high- or low-pass filter.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Integra (only needed with several devices)."
+        },
+        "channel": {
+          "name": "Output",
+          "description": "Output number, 1-based."
+        },
+        "filter": {
+          "name": "Filter",
+          "description": "High-pass or low-pass."
+        },
+        "frequency": {
+          "name": "Frequency",
+          "description": "Corner frequency in Hz."
+        },
+        "slope": {
+          "name": "Slope",
+          "description": "Slope in dB/octave."
+        }
+      }
+    },
+    "set_delay": {
+      "name": "Set delay",
+      "description": "Sets an output's delay (minimum 1 ms).",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Integra (only needed with several devices)."
+        },
+        "channel": {
+          "name": "Output",
+          "description": "Output number, 1-based."
+        },
+        "delay": {
+          "name": "Delay",
+          "description": "Delay in ms."
+        }
+      }
+    },
+    "set_matrix": {
+      "name": "Set matrix crosspoint",
+      "description": "Switches a crosspoint of the routing matrix.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Integra (only needed with several devices)."
+        },
+        "input": {
+          "name": "Input",
+          "description": "Input number, 1-based."
+        },
+        "output": {
+          "name": "Output",
+          "description": "Output number, 1-based."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Turn the crosspoint on or off."
+        }
+      }
+    },
+    "recall_preset": {
+      "name": "Recall preset",
+      "description": "Recalls a stored preset of the Integra.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Integra (only needed with several devices)."
+        },
+        "preset": {
+          "name": "Preset",
+          "description": "Preset number, 1-based."
+        }
+      }
+    }
+  },
+  "selector": {
+    "side": {
+      "options": {
+        "input": "Input",
+        "output": "Output"
+      }
+    },
+    "filter": {
+      "options": {
+        "hpf": "High-pass",
+        "lpf": "Low-pass"
       }
     }
   }

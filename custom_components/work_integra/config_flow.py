@@ -13,10 +13,12 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 
 from .const import (
+    CONF_DSP_PORT,
     CONF_HOST,
     CONF_INPUTS,
     CONF_OUTPUTS,
     CONF_PORT,
+    DEFAULT_DSP_PORT,
     DEFAULT_INPUTS,
     DEFAULT_OUTPUTS,
     DEFAULT_PORT,
@@ -57,6 +59,7 @@ class IntegraConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
                 vol.Required(CONF_OUTPUTS, default=DEFAULT_OUTPUTS): int,
                 vol.Required(CONF_INPUTS, default=DEFAULT_INPUTS): int,
+                vol.Optional(CONF_DSP_PORT, default=DEFAULT_DSP_PORT): int,
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)

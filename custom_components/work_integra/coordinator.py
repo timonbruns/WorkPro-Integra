@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import DOMAIN, SCAN_INTERVAL
 from .integra import IntegraClient, IntegraError
+from .integra_bin import IntegraDspClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,6 +48,8 @@ class IntegraCoordinator(DataUpdateCoordinator):
         # Letzter erfolgreich gelesener Zustand (bleibt bei Aussetzern erhalten).
         self._last_good: dict = {}
         self._fail_count = 0
+        # Client für das binäre DSP-Protokoll (wird in async_setup_entry gesetzt).
+        self.dsp: IntegraDspClient | None = None
 
     def channel_name(self, kind: str, channel: int, options: dict) -> str:
         override = options.get(f"{kind}_name_{channel}")
