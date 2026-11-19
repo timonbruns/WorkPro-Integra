@@ -115,8 +115,8 @@ class WorkIntegraEqCard extends HTMLElement {
     const root = this.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>
-        :host { display: block; }
-        ha-card { background: #0b0d10; color: #d7dde4; border: 1px solid #1d232b; overflow: hidden;
+        :host { display: block; height: 100%; }
+        ha-card { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; background: #0b0d10; color: #d7dde4; border: 1px solid #1d232b; overflow: hidden;
           font-family: var(--ha-font-family-body, Roboto, sans-serif); }
         .head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 6px; }
         .title { font-size: 15px; font-weight: 600; letter-spacing: .3px; }
@@ -129,7 +129,7 @@ class WorkIntegraEqCard extends HTMLElement {
         .chip { flex: 1 1 0; min-width: 34px; border-radius: 6px; padding: 6px 0; text-align: center; cursor: pointer;
           font-size: 12px; font-weight: 700; background: #151a20; border: 1px solid #262d36; color: #9aa4af; }
         .chip.sel { color: #0b0d10; }
-        .detail { padding: 6px 14px 14px; display: grid; grid-template-columns: 70px 1fr 78px; gap: 8px 10px; align-items: center; }
+        .detail { margin-top: auto; padding: 6px 14px 14px; display: grid; grid-template-columns: 70px 1fr 78px; gap: 8px 10px; align-items: center; }
         .detail .lbl { font-size: 12px; color: #8b95a1; text-transform: uppercase; letter-spacing: .6px; }
         .detail .val { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; color: #e9eef3; }
         input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; background: transparent; }

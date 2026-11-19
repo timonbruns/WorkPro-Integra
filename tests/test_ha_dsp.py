@@ -167,7 +167,8 @@ async def test_eq_card_is_served_and_registered(hass):
         await wi._async_register_frontend(hass)
     cfgs = [c.args[0][0] for c in http.async_register_static_paths.await_args_list]
     assert {c.url_path for c in cfgs} == {
-        "/work_integra/work-integra-eq-card.js", "/work_integra/work-integra-matrix-card.js"}
+        "/work_integra/work-integra-eq-card.js", "/work_integra/work-integra-comp-card.js",
+        "/work_integra/work-integra-matrix-card.js"}
     assert all(pathlib.Path(c.path).is_file() for c in cfgs)
 
     urls = [c.args[1] for c in add_js.call_args_list]
@@ -191,7 +192,8 @@ async def test_matrix_switches(hass, fake_device):
     eid = "switch.integra_127_0_0_1_matrix_funk_hand_ls_mitte"
     st = hass.states.get(eid)
     assert st is not None and st.attributes["matrix_input"] == 1 and st.attributes["matrix_output"] == 2
-    assert st.state == "unknown"
+    assert st.state == "off"  # Grundbelegung: nur Diagonale an
+    assert hass.states.get("switch.integra_127_0_0_1_matrix_funk_hand_ls_vorne").state == "on"
 
     await hass.services.async_call("switch", "turn_on", {"entity_id": eid}, blocking=True)
     await asyncio.sleep(0.1)

@@ -96,9 +96,11 @@ class IntegraMute(CoordinatorEntity[IntegraCoordinator], SwitchEntity):
 class IntegraMatrixPoint(RestoreEntity, SwitchEntity):
     """Kreuzpunkt der Routing-Matrix (an = Eingang liegt auf dem Ausgang).
 
-    Die Integra meldet den Matrix-Zustand nicht von sich aus. Angezeigt wird der
-    zuletzt bekannte Zustand: über Home Assistant geschaltet, per Live-Meldung
-    aus der Work-Software übernommen oder nach einem Neustart wiederhergestellt.
+    Die Integra meldet den Matrix-Zustand nicht von sich aus (er steht auch nicht
+    im lesbaren Speicherabbild). Angezeigt wird der zuletzt bekannte Zustand:
+    über Home Assistant geschaltet, per Live-Meldung aus der Work-Software
+    übernommen oder nach einem Neustart wiederhergestellt. Ohne bekannten Stand
+    gilt die Grundbelegung der Integra: Diagonale IN n -> OUT n an, Rest aus.
     Die Entitäten sind standardmäßig ausgeblendet (für die Matrix-Karte gedacht).
     """
 
@@ -136,6 +138,8 @@ class IntegraMatrixPoint(RestoreEntity, SwitchEntity):
         last = await self.async_get_last_state()
         if last is not None and last.state in ("on", "off"):
             self._attr_is_on = last.state == "on"
+        else:
+            self._attr_is_on = self._inp == self._out  # Grundbelegung: Diagonale
         dsp = self._coordinator.dsp
         if dsp is not None:
             self.async_on_remove(dsp.add_push_listener(self._on_push))

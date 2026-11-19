@@ -142,13 +142,29 @@ The card writes to helper entities; an automation forwards helper changes to
 calculated as peaking filters (RBJ cookbook, 48 kHz) – shelf/pass filter types
 are not modelled yet.
 
+### Compressor card
+
+```yaml
+type: custom:work-integra-comp-card
+title: Kanal 1 – Kompressor
+prefix: in1        # input_number.in1_comp_{threshold,ratio,attack,release}
+height: 300        # same height as the EQ card -> both fit side by side
+```
+
+Transfer curve (input vs. output, −60 … 0 dB) in the same console look: drag
+**T** to set the threshold, drag **R** to set the ratio; attack and release (and
+fine values) via the sliders. Both cards stretch to the row height, so with
+`grid_options: {columns: 6}` the EQ and the compressor sit side by side.
+
 ### Routing matrix
 
 For every input × output crosspoint the integration creates a `switch`
 (hidden by default, attributes `matrix_input`, `matrix_output`, `input_name`,
 `output_name`). The device does not report the matrix on its own, so a
 crosspoint starts as *unknown* and then follows what was switched in HA, live
-changes from the Work software, or the state restored after a restart.
+changes from the Work software, or the state restored after a restart. Without
+a known state the Integra's default routing is assumed (diagonal IN n → OUT n on,
+everything else off).
 
 ```yaml
 type: custom:work-integra-matrix-card
@@ -157,7 +173,7 @@ entity_prefix: switch.integra   # optional: only this device's crosspoints
 ```
 
 The card shows inputs as rows and outputs as columns; tap a crosspoint to switch
-it. Hatched points are still unknown.
+it.
 
 ### Live updates
 

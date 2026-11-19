@@ -40,7 +40,11 @@ PLATFORMS: list[Platform] = [
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 FRONTEND_DIR = Path(__file__).parent / "frontend"
-FRONTEND_CARDS = ("work-integra-eq-card.js", "work-integra-matrix-card.js")
+FRONTEND_CARDS = (
+    "work-integra-eq-card.js",
+    "work-integra-comp-card.js",
+    "work-integra-matrix-card.js",
+)
 EQ_CARD_FILE = FRONTEND_DIR / "work-integra-eq-card.js"
 EQ_CARD_URL = f"/{DOMAIN}/work-integra-eq-card.js"
 
@@ -53,7 +57,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:
-    """Liefert die Lovelace-Karten (EQ, Matrix) mit aus.
+    """Liefert die Lovelace-Karten (EQ, Kompressor, Matrix) mit aus.
 
     Kein manueller Ressourcen-Eintrag nötig: Die Datei wird über HA bereitgestellt
     und automatisch im Frontend geladen (Versionsparameter gegen Browser-Cache).
