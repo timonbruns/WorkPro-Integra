@@ -352,11 +352,7 @@ class IntegraDspClient:
             self._last_session = self._last_seen
             self._set_available(True)
             if decoded is not None:
-                for cb in list(self._push_listeners):
-                    try:
-                        cb(decoded)
-                    except Exception:  # pragma: no cover
-                        _LOGGER.exception("Fehler im Push-Listener")
+                self._notify_push(decoded)
             return
 
         pending = self._pending
@@ -504,6 +500,18 @@ class IntegraDspClient:
         _check_channel(output_ch)
         point = ((output_ch - 1) << 8) | (input_ch - 1)
         self.send_set(MOD_MATRIX, MATRIX_POINT, point, 1 if on else 0)
+        # Das Gerät schickt eigene Änderungen nicht zurück. Damit z. B. Matrix-
+        # Schalter auch bei Aufruf über den Dienst stimmen, lokal melden.
+        decoded = decode_set(struct.pack("<HHhh", MOD_MATRIX, MATRIX_POINT, point, 1 if on else 0))
+        if decoded is not None:
+            self._notify_push({**decoded, "local": True})
+
+    def _notify_push(self, decoded: dict) -> None:
+        for cb in list(self._push_listeners):
+            try:
+                cb(decoded)
+            except Exception:  # pragma: no cover
+                _LOGGER.exception("Fehler im Push-Listener")
 
 
 def _clamp(value, low, high):

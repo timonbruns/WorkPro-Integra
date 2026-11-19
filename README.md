@@ -142,6 +142,23 @@ The card writes to helper entities; an automation forwards helper changes to
 calculated as peaking filters (RBJ cookbook, 48 kHz) – shelf/pass filter types
 are not modelled yet.
 
+### Routing matrix
+
+For every input × output crosspoint the integration creates a `switch`
+(hidden by default, attributes `matrix_input`, `matrix_output`, `input_name`,
+`output_name`). The device does not report the matrix on its own, so a
+crosspoint starts as *unknown* and then follows what was switched in HA, live
+changes from the Work software, or the state restored after a restart.
+
+```yaml
+type: custom:work-integra-matrix-card
+title: Matrix
+entity_prefix: switch.integra   # optional: only this device's crosspoints
+```
+
+The card shows inputs as rows and outputs as columns; tap a crosspoint to switch
+it. Hatched points are still unknown.
+
 ### Live updates
 
 The Integra forwards every DSP change made by another client (e.g. WorkPro DSP

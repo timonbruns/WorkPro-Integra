@@ -3,6 +3,7 @@
 Benötigt: pip install pytest-homeassistant-custom-component
 """
 import asyncio
+import pathlib
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -164,11 +165,14 @@ async def test_eq_card_is_served_and_registered(hass):
     hass.config.components.add("frontend")
     with patch("homeassistant.components.frontend.add_extra_js_url") as add_js:
         await wi._async_register_frontend(hass)
-    cfg = http.async_register_static_paths.await_args.args[0][0]
-    assert cfg.url_path == "/work_integra/work-integra-eq-card.js"
-    assert cfg.path == str(wi.EQ_CARD_FILE)
-    url = add_js.call_args.args[1]
-    assert url.startswith("/work_integra/work-integra-eq-card.js?v=")
+    cfgs = [c.args[0][0] for c in http.async_register_static_paths.await_args_list]
+    assert {c.url_path for c in cfgs} == {
+        "/work_integra/work-integra-eq-card.js", "/work_integra/work-integra-matrix-card.js"}
+    assert all(pathlib.Path(c.path).is_file() for c in cfgs)
+
+    urls = [c.args[1] for c in add_js.call_args_list]
+    assert any(u.startswith("/work_integra/work-integra-eq-card.js?v=") for u in urls)
+    assert any(u.startswith("/work_integra/work-integra-matrix-card.js?v=") for u in urls)
 
 
 async def test_eq_card_skipped_without_frontend(hass):
@@ -179,3 +183,35 @@ async def test_eq_card_skipped_without_frontend(hass):
     with patch("homeassistant.components.frontend.add_extra_js_url") as add_js:
         await wi._async_register_frontend(hass)
     add_js.assert_not_called()
+
+
+async def test_matrix_switches(hass, fake_device):
+    fake, port = fake_device
+    entry, _ = await _setup(hass, port)
+    eid = "switch.integra_127_0_0_1_matrix_funk_hand_ls_mitte"
+    st = hass.states.get(eid)
+    assert st is not None and st.attributes["matrix_input"] == 1 and st.attributes["matrix_output"] == 2
+    assert st.state == "unknown"
+
+    await hass.services.async_call("switch", "turn_on", {"entity_id": eid}, blocking=True)
+    await asyncio.sleep(0.1)
+    assert _sets(fake)[-1] == bytes.fromhex("a600010000010100")
+    assert hass.states.get(eid).state == "on"
+
+    # Dienst set_matrix aktualisiert den Schalter ebenfalls
+    await hass.services.async_call(DOMAIN, "set_matrix", {"input": 1, "output": 2, "enabled": False}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(eid).state == "off"
+
+    # Änderung aus der Work-Software (anderer Client) -> Schalter folgt
+    other = ib.IntegraDspClient("127.0.0.1", port)
+    await other.connect(keepalive=False)
+    other.send_set(ib.MOD_MATRIX, ib.MATRIX_POINT, 0x0100, 1)
+    await asyncio.sleep(0.2)
+    await hass.async_block_till_done()
+    other.close()
+    assert hass.states.get(eid).state == "on"
+
+    matrix = [s for s in hass.states.async_all("switch") if "matrix_input" in s.attributes]
+    assert len(matrix) == 4  # 2 Eingänge x 2 Ausgänge im Test
+    assert await hass.config_entries.async_unload(entry.entry_id)
