@@ -19,6 +19,16 @@ _spec.loader.exec_module(ib)
 H = bytes.fromhex
 
 
+def _run(coro):
+    """Eigene Event-Loop ohne asyncio.run(): verändert die globale Loop-Policy
+    nicht und verträgt sich so mit dem HA-Testpaket."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 # --- Rahmen exakt wie von DSP 1.5 gesendet --------------------------------
 CAPTURED = {
     "keepalive": (lambda: ib.build_frame(ib.CMD_KEEPALIVE, bytes(16)),
@@ -132,7 +142,8 @@ class FakeIntegra(asyncio.DatagramProtocol):
 
     def __init__(self):
         self.received = []
-        self.clients = set()
+        self.clients = set()      # alle, die etwas gesendet haben
+        self.sessions = set()     # angemeldet (komplettes Abbild gelesen)
         self.drop_next = 0
 
     def connection_made(self, transport):
@@ -147,10 +158,16 @@ class FakeIntegra(asyncio.DatagramProtocol):
             self.drop_next -= 1
             return
         if f.cmd == ib.CMD_SET:
-            for c in self.clients - {addr}:   # an andere Clients weiterleiten
+            for c in self.sessions - {addr}:  # nur an angemeldete Clients weiterleiten
                 self.t.sendto(data, c)
         elif f.cmd == ib.CMD_KEEPALIVE:
-            self.reply(ib.build_frame(ib.CMD_KEEPALIVE), f, addr)
+            if addr in self.sessions:          # echte Integra: nur mit Sitzung
+                self.reply(ib.build_frame(ib.CMD_KEEPALIVE), f, addr)
+        elif f.cmd == ib.CMD_METER and f.payload[:1] == b"\x00":
+            self.sessions.discard(addr)        # "Meter aus" beendet die Sitzung
+        elif f.cmd == ib.CMD_STATUS:
+            if addr in self.sessions:
+                self.reply(ib.build_frame(ib.CMD_STATUS + 1, bytes(152)), f, addr)
         elif f.cmd == ib.CMD_RECALL:
             self.reply(ib.build_frame(ib.CMD_RECALL + 1, f.payload), f, addr)
         elif f.cmd == ib.CMD_INFO:
@@ -165,6 +182,9 @@ class FakeIntegra(asyncio.DatagramProtocol):
         elif f.cmd == ib.CMD_READ_PAGE:
             page = f.page
             body = bytes([page]) * (1008 if page < 14 else 842)
+            if page == 14:                     # Abschluss wie am Gerät: erst 0xA3, dann Seite
+                self.reply(ib.build_frame(0xA3, bytes(16), pages=15, page=14), f, addr)
+                self.sessions.add(addr)
             self.reply(ib.build_frame(ib.CMD_READ_PAGE + 1, body, pages=15, page=page), f, addr)
 
     def reply(self, data, req, addr):
@@ -191,8 +211,9 @@ def test_fake_device_roundtrip():
         ha.add_availability_listener(avail.append)
         await ha.connect()
         await dsp15.connect(keepalive=False)
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.5)                      # Anmeldung + erstes Keepalive
         assert ha.available and avail == [True]
+        assert ha.info["name"] == "INTEGRA 8S" and len(ha.image) == 14954
 
         info = await ha.get_info()
         assert info == {"name": "INTEGRA 8S", "ip": "192.168.178.249", "netmask": "255.255.255.0",
@@ -214,4 +235,42 @@ def test_fake_device_roundtrip():
         t.close()
         assert ha.available is False
 
-    asyncio.run(run())
+    _run(run())
+
+
+def test_no_session_without_full_image_read():
+    """Wie am Gerät verifiziert: Info allein öffnet keine Sitzung."""
+    async def run():
+        t, fake, port = await _start_fake()
+        c = ib.IntegraDspClient("127.0.0.1", port)
+        await c.connect(keepalive=False)
+        await c.get_info()
+        c._send(ib.build_frame(ib.CMD_KEEPALIVE))
+        await asyncio.sleep(0.2)
+        assert not c.available
+        await c.login()
+        c._send(ib.build_frame(ib.CMD_KEEPALIVE))
+        await asyncio.sleep(0.2)
+        assert c.available
+        c.close()
+        t.close()
+
+    _run(run())
+
+
+def test_relogin_after_session_loss():
+    async def run():
+        t, fake, port = await _start_fake()
+        c = ib.IntegraDspClient("127.0.0.1", port)
+        await c.connect()
+        await asyncio.sleep(0.5)
+        assert c.available
+        fake.sessions.clear()                 # Gerät verliert die Sitzung (z. B. Neustart)
+        c._last_session -= 60
+        c._last_login_try -= 60
+        await asyncio.sleep(2.5)              # ein Keepalive-Zyklus -> Neuanmeldung
+        assert fake.sessions and c.available
+        c.close()
+        t.close()
+
+    _run(run())

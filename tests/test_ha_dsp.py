@@ -50,7 +50,7 @@ async def _setup(hass, port):
     with patch.multiple("custom_components.work_integra.integra.IntegraClient", **mocks):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
-        await asyncio.sleep(0.3)  # erstes Keepalive beantworten lassen
+        await asyncio.sleep(0.6)  # Anmeldung + erstes Keepalive
         await hass.async_block_till_done()
     return entry, mocks
 
@@ -142,7 +142,7 @@ async def test_connectivity_goes_off_when_device_silent(hass, fake_device):
     fake, port = fake_device
     entry, _ = await _setup(hass, port)
     coord = hass.data[DOMAIN][entry.entry_id]
-    coord.dsp._last_seen -= 60          # Funkstille simulieren
+    coord.dsp._last_session -= 60       # Funkstille simulieren
     fake.drop_next = 10**6              # Gerät antwortet nicht mehr
     await asyncio.sleep(2.2)            # ein Keepalive-Zyklus
     await hass.async_block_till_done()

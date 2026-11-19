@@ -129,6 +129,21 @@ class IntegraClient:
             start = end = int(channel_spec)
         return start, end, parts[3:]
 
+    @staticmethod
+    def _floats(start: int, values: list[str]) -> dict[int, float]:
+        """Wandelt Werte um; leere/ungültige Einträge (z. B. abschließendes '#',
+        an der Integra 8S beobachtet) werden übersprungen statt den Poll abzubrechen."""
+        result: dict[int, float] = {}
+        for i, v in enumerate(values):
+            try:
+                result[start + i] = float(v)
+            except ValueError:
+                if v.strip():
+                    _LOGGER.debug("Unerwarteter Wert %r für Kanal %d ignoriert", v, start + i)
+        if not result:
+            raise IntegraError(f"Antwort ohne gültige Werte: {values!r}")
+        return result
+
     # --- Lautstärke (Output-Gain) --------------------------------------
 
     async def set_output_gain(self, channel: int, db: float) -> None:
@@ -141,7 +156,7 @@ class IntegraClient:
         if reply is None:
             raise IntegraError("Keine Antwort auf get:output#gain")
         s, _e, values = self._parse_values(reply)
-        return {s + i: float(v) for i, v in enumerate(values)}
+        return self._floats(s, values)
 
     # --- Mute (Output) --------------------------------------------------
 
@@ -171,7 +186,7 @@ class IntegraClient:
         if reply is None:
             raise IntegraError("Keine Antwort auf get:input#gain")
         s, _e, values = self._parse_values(reply)
-        return {s + i: float(v) for i, v in enumerate(values)}
+        return self._floats(s, values)
 
     # --- Mute (Input) ---------------------------------------------------
 
@@ -198,7 +213,7 @@ class IntegraClient:
         if reply is None:
             raise IntegraError("Keine Antwort auf get:output#level")
         s, _e, values = self._parse_values(reply)
-        return {s + i: float(v) for i, v in enumerate(values)}
+        return self._floats(s, values)
 
     async def get_input_levels(self, start: int, end: int) -> dict[int, float]:
         reply = await self._command(
@@ -207,7 +222,7 @@ class IntegraClient:
         if reply is None:
             raise IntegraError("Keine Antwort auf get:input#level")
         s, _e, values = self._parse_values(reply)
-        return {s + i: float(v) for i, v in enumerate(values)}
+        return self._floats(s, values)
 
     # --- Kanalnamen -----------------------------------------------------
 
