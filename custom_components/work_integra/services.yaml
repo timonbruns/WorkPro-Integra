@@ -206,3 +206,14 @@ recall_preset:
           min: 1
           max: 16
           mode: box
+
+read_dsp:
+  fields:
+    device_id:
+      selector:
+        device:
+          integration: work_integra
+    full:
+      default: true
+      selector:
+        boolean:

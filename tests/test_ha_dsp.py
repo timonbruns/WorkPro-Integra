@@ -217,3 +217,20 @@ async def test_matrix_switches(hass, fake_device):
     matrix = [s for s in hass.states.async_all("switch") if "matrix_input" in s.attributes]
     assert len(matrix) == 4  # 2 Eingänge x 2 Ausgänge im Test
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_read_dsp_reports_eq_from_device(hass, fake_device):
+    from .test_integra_bin import make_image
+
+    fake, port = fake_device
+    fake.image = make_image({(1, 2): (642, 13.0, 6.89), (1, 0): 0})
+    entry, _ = await _setup(hass, port)
+    events = async_capture_events(hass, EVENT_DSP_CHANGED)
+    await hass.services.async_call(DOMAIN, "read_dsp", {}, blocking=True)
+    await hass.async_block_till_done()
+    got = {(e.data["channel"], e.data.get("band", 0), e.data["param"]): e.data["value"]
+           for e in events if e.data.get("source") == "image"}
+    assert got[(1, 2, "frequency")] == 642 and got[(1, 2, "gain")] == 13.0 and got[(1, 2, "q")] == 6.89
+    assert got[(1, 0, "bypass")] is False
+    assert len(got) == 2 * 25          # 2 Eingänge im Test
+    assert await hass.config_entries.async_unload(entry.entry_id)

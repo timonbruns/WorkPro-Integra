@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
@@ -25,7 +26,7 @@ from .const import (
 )
 from .coordinator import IntegraCoordinator
 from .integra import IntegraClient, IntegraError
-from .integra_bin import IntegraDspClient
+from .integra_bin import IntegraDspClient, IntegraDspError
 from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -107,10 +108,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     dsp = IntegraDspClient(
         entry.data[CONF_HOST], entry.data.get(CONF_DSP_PORT, DEFAULT_DSP_PORT)
     )
-    try:
-        await dsp.connect()
-    except OSError as err:
-        _LOGGER.warning("DSP-Protokoll nicht verfügbar: %s", err)
+    dsp.input_count = inputs
     coordinator.dsp = dsp
 
     @callback
@@ -120,6 +118,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     entry.async_on_unload(dsp.add_push_listener(_on_dsp_push))
+    try:
+        await dsp.connect()
+    except OSError as err:
+        _LOGGER.warning("DSP-Protokoll nicht verfügbar: %s", err)
+
+    async def _resync_when_started(_hass: HomeAssistant) -> None:
+        # Beim HA-Start sind Automationen evtl. noch nicht geladen, wenn die erste
+        # Anmeldung den EQ meldet. Deshalb nach dem Start einmal komplett melden.
+        if dsp.available or dsp.image is not None:
+            dsp.eq_state = {}
+            try:
+                await dsp.refresh_state()
+            except IntegraDspError as err:
+                _LOGGER.debug("EQ-Abgleich nach Start fehlgeschlagen: %s", err)
+
+    entry.async_on_unload(async_at_started(hass, _resync_when_started))
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

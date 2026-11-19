@@ -48,6 +48,7 @@ SERVICE_SET_FILTER = "set_filter"
 SERVICE_SET_DELAY = "set_delay"
 SERVICE_SET_MATRIX = "set_matrix"
 SERVICE_RECALL_PRESET = "recall_preset"
+SERVICE_READ_DSP = "read_dsp"
 
 _CHANNEL = vol.All(vol.Coerce(int), vol.Range(min=1, max=16))
 _DEVICE = vol.Optional(ATTR_DEVICE_ID)
@@ -102,6 +103,8 @@ SCHEMA_SET_MATRIX = vol.Schema(
         vol.Required(ATTR_ENABLED): cv.boolean,
     }
 )
+
+SCHEMA_READ_DSP = vol.Schema({_DEVICE: cv.string, vol.Optional("full", default=True): cv.boolean})
 
 SCHEMA_RECALL_PRESET = vol.Schema(
     {
@@ -206,6 +209,18 @@ def async_setup_services(hass: HomeAssistant) -> None:
         for coord in _targets(hass, call):
             await async_recall_preset(coord, call.data[ATTR_PRESET])
 
+    async def read_dsp(call: ServiceCall) -> None:
+        """Liest den EQ-Zustand vom Gerät und meldet ihn (alle Werte bei full=true)."""
+        for coord in _targets(hass, call):
+            dsp = _dsp(coord)
+            if call.data.get("full", True):
+                dsp.eq_state = {}
+            try:
+                await dsp.refresh_state()
+            except IntegraDspError as err:
+                raise HomeAssistantError(str(err)) from err
+
+    hass.services.async_register(DOMAIN, SERVICE_READ_DSP, read_dsp, SCHEMA_READ_DSP)
     hass.services.async_register(DOMAIN, SERVICE_SET_PEQ, set_peq, SCHEMA_SET_PEQ)
     hass.services.async_register(DOMAIN, SERVICE_SET_COMPRESSOR, set_compressor, SCHEMA_SET_COMPRESSOR)
     hass.services.async_register(DOMAIN, SERVICE_SET_FILTER, set_filter, SCHEMA_SET_FILTER)
@@ -215,11 +230,12 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
 
 async def async_recall_preset(coordinator: IntegraCoordinator, preset: int) -> None:
-    """Ruft ein Preset ab und liest danach Gain/Mute neu ein."""
+    """Ruft ein Preset ab und liest danach EQ (über das Abbild) sowie Gain/Mute neu ein."""
     try:
         await _dsp(coordinator).recall_preset(preset)
     except IntegraDspError as err:
         raise HomeAssistantError(f"Preset {preset} konnte nicht abgerufen werden: {err}") from err
-    # Die Integra lädt das Preset; danach Fader/Mutes im HA-Zustand nachziehen.
-    await asyncio.sleep(1.0)
+    # EQ-Werte meldet der Client nach dem Abruf selbst (Event work_integra_dsp_changed);
+    # Fader/Mutes über das ASCII-Protokoll nachziehen.
+    await asyncio.sleep(0.5)
     await coordinator.async_request_refresh()
