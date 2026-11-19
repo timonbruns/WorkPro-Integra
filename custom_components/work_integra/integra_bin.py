@@ -84,7 +84,7 @@ def mod_output_delay(channel: int) -> int:
 
 
 # Parameter
-PEQ_BYPASS = 1
+PEQ_ENABLE = 1  # 1 = EQ aktiv, 0 = gebrückt (Bypass) – am Gerät verifiziert
 PEQ_TYPE = 2
 PEQ_FREQ = 3
 PEQ_GAIN = 4
@@ -187,9 +187,9 @@ def decode_set(payload: bytes) -> dict | None:
     if 0x61 <= module <= 0x70 or 0xC7 <= module <= 0xD6:
         side = "input" if module <= 0x70 else "output"
         channel = module - (0x60 if side == "input" else 0xC6)
-        if param == PEQ_BYPASS:
+        if param == PEQ_ENABLE:
             return {"kind": "peq", "side": side, "channel": channel,
-                    "param": "bypass", "value": bool(w1), **raw}
+                    "param": "bypass", "value": not w1, **raw}
         names = {PEQ_TYPE: "type", PEQ_FREQ: "frequency", PEQ_GAIN: "gain", PEQ_Q: "q"}
         scale = {PEQ_GAIN: 100, PEQ_Q: 100}.get(param, 1)
         return {"kind": "peq", "side": side, "channel": channel, "band": w1 + 1,
@@ -440,7 +440,8 @@ class IntegraDspClient:
         raise ValueError("side muss 'input' oder 'output' sein")
 
     def set_peq_bypass(self, side: str, channel: int, bypass: bool) -> None:
-        self.send_set(self._peq_module(side, channel), PEQ_BYPASS, 1 if bypass else 0)
+        """Bypass an = EQ gebrückt. Das Gerät erwartet den umgekehrten Wert (1 = EQ aktiv)."""
+        self.send_set(self._peq_module(side, channel), PEQ_ENABLE, 0 if bypass else 1)
 
     def set_peq_frequency(self, side: str, channel: int, band: int, hz: float) -> None:
         _check_band(band)

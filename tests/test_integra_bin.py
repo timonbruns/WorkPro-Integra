@@ -80,7 +80,8 @@ def _client_frames(fn):
         (lambda c: c.set_peq_gain("input", 1, 2, 3), "6100 0400 0100 2c01"),
         (lambda c: c.set_peq_frequency("input", 1, 1, 2000), "6100 0300 0000 d007"),
         (lambda c: c.set_peq_q("input", 1, 1, 4.0), "6100 0500 0000 9001"),
-        (lambda c: c.set_peq_bypass("input", 1, True), "6100 0100 0100 0000"),
+        (lambda c: c.set_peq_bypass("input", 1, True), "6100 0100 0000 0000"),
+        (lambda c: c.set_peq_bypass("input", 1, False), "6100 0100 0100 0000"),
         (lambda c: c.set_peq_gain("output", 1, 1, -3), "c700 0400 0000 d4fe"),
         (lambda c: c.set_peq_gain("output", 2, 1, 3), "c800 0400 0000 2c01"),
         (lambda c: c.set_comp_threshold(1, -20), "2100 0200 30f8 0000"),
@@ -117,6 +118,12 @@ def test_decode_set():
     assert (d["kind"], d["input"], d["output"], d["value"]) == ("matrix", 1, 2, True)
     d = ib.decode_set(H("e7000200 14000000".replace(" ", "")))
     assert (d["kind"], d["channel"], d["value"]) == ("delay", 1, 20)
+
+
+def test_decode_bypass_polarity():
+    """Am Gerät verifiziert: 1 = EQ aktiv, 0 = Bypass."""
+    assert ib.decode_set(H("6100010001000000"))["value"] is False
+    assert ib.decode_set(H("6100010000000000"))["value"] is True
 
 
 def test_parse_checksum_flag():
