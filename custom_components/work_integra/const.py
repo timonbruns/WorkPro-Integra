@@ -37,5 +37,10 @@ INPUT_GAIN_MAX_DB = 12.0
 GAIN_STEP_DB = 0.5
 
 # Poll-Intervall: Wie oft HA den Ist-Zustand vom Gerät abfragt
-# (fängt auch externe Änderungen über Wandregler/Software auf).
-SCAN_INTERVAL = timedelta(seconds=10)
+# (fängt externe Änderungen über Wandregler/Software/Preset-Wechsel auf).
+SCAN_INTERVAL = timedelta(seconds=2)
+
+# Nach einer Bedienung in HA gilt der gesendete Wert so lange als maßgeblich,
+# bis das Gerät ihn sicher übernommen hat. So springt ein Fader beim Ziehen
+# nicht auf einen älteren, gerade gepollten Wert zurück.
+OPTIMISTIC_HOLD_SECONDS = 3.0

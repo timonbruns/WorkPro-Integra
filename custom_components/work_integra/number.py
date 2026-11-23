@@ -88,10 +88,10 @@ class IntegraGain(CoordinatorEntity[IntegraCoordinator], NumberEntity):
         return data.get(self._channel)
 
     async def async_set_native_value(self, value: float) -> None:
-        # 1) Optimistisch sofort anzeigen -> Fader bleibt beim Schieben stehen.
-        if self.coordinator.data is not None:
-            self.coordinator.data.setdefault(f"{self._kind}_gain", {})[self._channel] = value
-            self.async_write_ha_state()
+        # 1) Optimistisch sofort anzeigen und für kurze Zeit gegen ältere
+        #    Poll-Werte schützen -> Fader springt beim Ziehen nicht zurück.
+        self.coordinator.set_optimistic(f"{self._kind}_gain", self._channel, value)
+        self.async_write_ha_state()
         # 2) An das Gerät senden (fire-and-forget, kein Sofort-Refresh).
         if self._kind == "input":
             await self.coordinator.client.set_input_gain(self._channel, value)

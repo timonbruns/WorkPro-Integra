@@ -162,11 +162,11 @@ they sit side by side on wide screens and stack on narrow ones.
 
 For every input × output crosspoint the integration creates a `switch`
 (hidden by default, attributes `matrix_input`, `matrix_output`, `input_name`,
-`output_name`). The device does not report the matrix on its own, so a
-crosspoint starts as *unknown* and then follows what was switched in HA, live
-changes from the Work software, or the state restored after a restart. Without
-a known state the Integra's default routing is assumed (diagonal IN n → OUT n on,
-everything else off).
+`output_name`). The matrix is **read from the device** on every poll via the
+ASCII command `get:mixer#switch#<inputs>#<output>` (verified on an Integra 8S),
+so the switches follow preset recalls and changes made in the Work software.
+Switching uses the DSP protocol; the sent value is protected against an older
+poll result for a few seconds.
 
 ```yaml
 type: custom:work-integra-matrix-card
@@ -218,8 +218,10 @@ actions:
   inputs) after start-up, after every preset recall and on demand via
   `work_integra.read_dsp`; values arrive as `work_integra_dsp_changed` events
   with `source: image`, so the same sync automation updates your helpers.
-- The compressor cannot be read back: its live values are not part of the
-  readable parameter image (only the state of the last loaded preset).
+- The compressor's live values are not part of the readable parameter image;
+  the image holds the compressor of the last loaded preset. Therefore the
+  compressor is reported right after a preset recall (`source: preset`), so
+  helpers follow preset changes; in between, HA is the reference.
 - Integra 16+ with WorkPro DSP 3.0 uses the same transport but its module
   numbering has not been checked yet.
 
@@ -228,9 +230,16 @@ actions:
 - **Gain range:** output gain is −72 … +12 dB. Input gain uses the same range by
   default; adjust `INPUT_GAIN_MIN_DB` / `INPUT_GAIN_MAX_DB` in `const.py` if your
   unit differs.
-- **Poll interval:** state is refreshed every 10 s (`SCAN_INTERVAL` in
-  `const.py`), which also picks up changes made at a wall controller or in the
-  Work software.
+- **Poll interval:** gain, mute and matrix are refreshed every 2 s
+  (`SCAN_INTERVAL` in `const.py`), which also picks up preset recalls and
+  changes made at a wall controller or in the Work software.
+- **Real-time faders:** set commands are sent immediately, even while a poll is
+  in flight, and a value set from HA is protected for 3 s
+  (`OPTIMISTIC_HOLD_SECONDS`) so a fader never jumps back while it is dragged.
+  Use live-updating sliders in your dashboards (e.g. Bubble Card
+  `slider_live_update: true`).
+- **Preset names** are read from the device (`get:scene#name`) and used as the
+  options of the preset select.
 - **Brand images:** an icon and logo ship in `custom_components/work_integra/brand/`
   and are shown automatically on Home Assistant 2026.3 and newer.
 

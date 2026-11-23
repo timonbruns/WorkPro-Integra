@@ -335,8 +335,11 @@ def test_login_publishes_eq_and_recall_publishes_changes():
 
         events.clear()
         await c.recall_preset(2)
-        changed = {(e["channel"], e.get("band", 0), e["param"]): e["value"] for e in events}
+        changed = {(e["channel"], e.get("band", 0), e["param"]): e["value"]
+                   for e in events if e.get("source") == "image"}
         assert changed == {(1, 3, "frequency"): 1000, (1, 3, "gain"): -2.0, (1, 3, "q"): 1.0, (1, 0, "bypass"): False}
+        comp = [e for e in events if e.get("source") == "preset"]
+        assert comp and all(e["kind"] == "compressor" for e in comp)
 
         # eigene Änderungen werden mitgeführt -> kein erneutes Melden beim nächsten Lesen
         events.clear()
