@@ -163,7 +163,9 @@ they sit side by side on wide screens and stack on narrow ones.
 Live levels of all inputs and outputs, streamed via a websocket subscription
 (`work_integra/subscribe_meters`) – **no entities, nothing in the recorder**.
 The integration polls `get:input#level` / `get:output#level` (≈10×/s) only while
-at least one card is visible.
+at least one card is visible. The device reports dB with one decimal (verified on
+an Integra 8S: unused inputs ≈ −105 dB, a line source ≈ −35 dB); values below
+`min_db` are shown as −∞.
 
 ```yaml
 type: custom:work-integra-meter-card

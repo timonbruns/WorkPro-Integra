@@ -74,3 +74,12 @@ def test_matrix_reply_parsing_from_device():
         assert r == {i: i == 4 for i in range(8)}
     finally:
         loop.close()
+
+
+def test_level_reply_parsing_from_device():
+    """Antworten 1:1 von der Integra 8S (23.11.2026, Internetradio auf IN8)."""
+    s, _e, values = ia.IntegraClient._parse_values("get:input#level#0-7#-104.8#-105.0#-104.3#-104.7#-104.7#-104.0#-105.8#-35.2")
+    lv = ia.IntegraClient._floats(s, values)
+    assert lv[7] == -35.2 and lv[0] == -104.8 and len(lv) == 8
+    s, _e, values = ia.IntegraClient._parse_values("get:input#level#7#-36.6")
+    assert ia.IntegraClient._floats(s, values) == {7: -36.6}
