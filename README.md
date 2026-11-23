@@ -158,6 +158,23 @@ fine values) via the sliders. Both cards stretch to the row height. Put them in 
 section with `column_span: 2` and give each card `grid_options: {columns: 12}` –
 they sit side by side on wide screens and stack on narrow ones.
 
+### Level meter card
+
+Live levels of all inputs and outputs, streamed via a websocket subscription
+(`work_integra/subscribe_meters`) – **no entities, nothing in the recorder**.
+The integration polls `get:input#level` / `get:output#level` (≈10×/s) only while
+at least one card is visible.
+
+```yaml
+type: custom:work-integra-meter-card
+title: Pegel
+inputs: [Headset 1, Headset 2, Handfunk 1, Handfunk 2, BT L, BT R, Beamer, Radio]   # optional
+outputs: [Saal L, Saal R, Oben L, Oben R, Sub, Aufnahme, Out 7, Out 8]               # optional
+min_db: -60
+max_db: 0
+height: 220
+```
+
 ### Routing matrix
 
 For every input × output crosspoint the integration creates a `switch`

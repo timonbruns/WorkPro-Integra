@@ -174,7 +174,7 @@ async def test_eq_card_is_served_and_registered(hass):
     cfgs = [c.args[0][0] for c in http.async_register_static_paths.await_args_list]
     assert {c.url_path for c in cfgs} == {
         "/work_integra/work-integra-eq-card.js", "/work_integra/work-integra-comp-card.js",
-        "/work_integra/work-integra-matrix-card.js"}
+        "/work_integra/work-integra-matrix-card.js", "/work_integra/work-integra-meter-card.js"}
     assert all(pathlib.Path(c.path).is_file() for c in cfgs)
 
     urls = [c.args[1] for c in add_js.call_args_list]
@@ -298,4 +298,30 @@ async def test_preset_names_and_compressor_after_recall(hass, fake_device):
     comp = {e.data["param"]: e.data["value"] for e in events
             if e.data.get("kind") == "compressor" and e.data["channel"] == 1}
     assert comp == {"threshold": -21.46, "ratio": 1.2, "attack": 30, "release": 1500}
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_meter_stream_via_websocket(hass, hass_ws_client, fake_device):
+    fake, port = fake_device
+    entry, mocks = await _setup(hass, port)
+    coord = hass.data[DOMAIN][entry.entry_id]
+    lv_in = AsyncMock(return_value={0: -12.5, 1: -60.0})
+    lv_out = AsyncMock(return_value={0: -3.0, 1: -100.0})
+    with patch.object(coord.client, "get_input_levels", lv_in), \
+         patch.object(coord.client, "get_output_levels", lv_out):
+        ws = await hass_ws_client(hass)
+        await ws.send_json({"id": 5, "type": "work_integra/subscribe_meters", "interval": 0.05})
+        res = await ws.receive_json()
+        assert res.get("success") is True, res
+        ev = await ws.receive_json()
+        assert ev["type"] == "event"
+        assert ev["event"]["in"] == [-12.5, -60.0] and ev["event"]["out"] == [-3.0, -100.0]
+        assert ev["event"]["names"]["in"] == ["Funk Hand", "Funk Headset"]
+        ev2 = await ws.receive_json()
+        assert "names" not in ev2["event"]                # Namen nur einmal
+        assert lv_in.await_args.kwargs.get("fast") is True
+        await ws.send_json({"id": 6, "type": "unsubscribe_events", "subscription": 5})
+        await ws.receive_json()
+        await asyncio.sleep(0.15)
+        assert coord.meters._task is None                 # Abfrage stoppt ohne Zuschauer
     assert await hass.config_entries.async_unload(entry.entry_id)

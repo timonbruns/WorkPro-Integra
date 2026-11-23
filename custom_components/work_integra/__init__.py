@@ -27,6 +27,7 @@ from .const import (
 from .coordinator import IntegraCoordinator
 from .integra import IntegraClient, IntegraError
 from .integra_bin import IntegraDspClient, IntegraDspError
+from .meters import MeterStreamer, async_register_websocket
 from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ FRONTEND_CARDS = (
     "work-integra-eq-card.js",
     "work-integra-comp-card.js",
     "work-integra-matrix-card.js",
+    "work-integra-meter-card.js",
 )
 EQ_CARD_FILE = FRONTEND_DIR / "work-integra-eq-card.js"
 EQ_CARD_URL = f"/{DOMAIN}/work-integra-eq-card.js"
@@ -53,6 +55,7 @@ EQ_CARD_URL = f"/{DOMAIN}/work-integra-eq-card.js"
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Registriert die Dienste und die EQ-Karte einmalig für alle Integra-Geräte."""
     async_setup_services(hass)
+    async_register_websocket(hass)
     await _async_register_frontend(hass)
     return True
 
@@ -101,6 +104,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("Kanalnamen konnten nicht gelesen werden: %s", err)
 
     coordinator = IntegraCoordinator(hass, client, outputs, inputs, device_names)
+    coordinator.options = dict(entry.options)
+    coordinator.meters = MeterStreamer(hass, client, inputs, outputs)
     try:
         coordinator.scene_names = await client.get_scene_names()
     except IntegraError as err:
@@ -156,6 +161,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         coordinator: IntegraCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        if coordinator.meters is not None:
+            coordinator.meters.stop()
         coordinator.client.close()
         if coordinator.dsp is not None:
             coordinator.dsp.close()
