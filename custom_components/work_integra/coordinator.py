@@ -55,6 +55,10 @@ class IntegraCoordinator(DataUpdateCoordinator):
         self.dsp: IntegraDspClient | None = None
         # Preset-Namen vom Gerät (get:scene#name), in async_setup_entry gelesen
         self.scene_names: list[str] = []
+        # Optionen des Config-Entries (Kanalnamen), in async_setup_entry gesetzt
+        self.options: dict = {}
+        # Pegel-Stream (meters.MeterStreamer), in async_setup_entry gesetzt
+        self.meters = None
 
     def channel_name(self, kind: str, channel: int, options: dict) -> str:
         override = options.get(f"{kind}_name_{channel}")

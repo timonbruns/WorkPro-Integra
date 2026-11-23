@@ -85,6 +85,7 @@ class IntegraClient:
         expect_reply: bool = True,
         expect_token: str | None = None,
         retries: int = _RETRIES,
+        timeout: float = _REPLY_TIMEOUT,
     ) -> str | None:
         """Sendet einen ASCII-Befehl. Bei erwarteter Antwort wird bis zu
         `retries`-mal gesendet, falls Pakete verloren gehen."""
@@ -106,7 +107,7 @@ class IntegraClient:
                 self._expect_token = expect_token
                 self._transport.sendto(command.encode("utf-8"))
                 try:
-                    return await asyncio.wait_for(self._pending, timeout=_REPLY_TIMEOUT)
+                    return await asyncio.wait_for(self._pending, timeout=timeout)
                 except asyncio.TimeoutError:
                     _LOGGER.debug(
                         "Timeout (Versuch %d/%d) auf: %s", attempt, retries, command
@@ -208,18 +209,22 @@ class IntegraClient:
 
     # --- Pegel / Metering ----------------------------------------------
 
-    async def get_output_levels(self, start: int, end: int) -> dict[int, float]:
+    async def get_output_levels(self, start: int, end: int, fast: bool = False) -> dict[int, float]:
+        """Pegelanzeige je Kanal. fast=True: ein Versuch, kurzes Timeout (für den Meter-Stream)."""
         reply = await self._command(
-            f"get:output#level#{start}-{end}", expect_token=f"output#level#{start}-{end}"
+            f"get:output#level#{start}-{end}", expect_token=f"output#level#{start}-{end}",
+            **({"retries": 1, "timeout": 0.25} if fast else {}),
         )
         if reply is None:
             raise IntegraError("Keine Antwort auf get:output#level")
         s, _e, values = self._parse_values(reply)
         return self._floats(s, values)
 
-    async def get_input_levels(self, start: int, end: int) -> dict[int, float]:
+    async def get_input_levels(self, start: int, end: int, fast: bool = False) -> dict[int, float]:
+        """Pegelanzeige je Kanal. fast=True: ein Versuch, kurzes Timeout (für den Meter-Stream)."""
         reply = await self._command(
-            f"get:input#level#{start}-{end}", expect_token=f"input#level#{start}-{end}"
+            f"get:input#level#{start}-{end}", expect_token=f"input#level#{start}-{end}",
+            **({"retries": 1, "timeout": 0.25} if fast else {}),
         )
         if reply is None:
             raise IntegraError("Keine Antwort auf get:input#level")
