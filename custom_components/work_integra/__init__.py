@@ -101,6 +101,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("Kanalnamen konnten nicht gelesen werden: %s", err)
 
     coordinator = IntegraCoordinator(hass, client, outputs, inputs, device_names)
+    try:
+        coordinator.scene_names = await client.get_scene_names()
+    except IntegraError as err:
+        _LOGGER.debug("Preset-Namen konnten nicht gelesen werden: %s", err)
     await coordinator.async_config_entry_first_refresh()
 
     # Binäres DSP-Protokoll (EQ, Kompressor, Filter, Delay, Matrix, Presets).

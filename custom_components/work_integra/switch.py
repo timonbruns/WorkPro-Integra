@@ -84,42 +84,42 @@ class IntegraMute(CoordinatorEntity[IntegraCoordinator], SwitchEntity):
 
     async def _set_mute(self, mute: bool) -> None:
         # Optimistisch sofort anzeigen, dann senden (kein Sofort-Refresh).
-        if self.coordinator.data is not None:
-            self.coordinator.data.setdefault(f"{self._kind}_mute", {})[self._channel] = mute
-            self.async_write_ha_state()
+        self.coordinator.set_optimistic(f"{self._kind}_mute", self._channel, mute)
+        self.async_write_ha_state()
         if self._kind == "input":
             await self.coordinator.client.set_input_mute(self._channel, mute)
         else:
             await self.coordinator.client.set_output_mute(self._channel, mute)
 
 
-class IntegraMatrixPoint(RestoreEntity, SwitchEntity):
+class IntegraMatrixPoint(CoordinatorEntity[IntegraCoordinator], RestoreEntity, SwitchEntity):
     """Kreuzpunkt der Routing-Matrix (an = Eingang liegt auf dem Ausgang).
 
-    Die Integra meldet den Matrix-Zustand nicht von sich aus (er steht auch nicht
-    im lesbaren Speicherabbild). Angezeigt wird der zuletzt bekannte Zustand:
-    über Home Assistant geschaltet, per Live-Meldung aus der Work-Software
-    übernommen oder nach einem Neustart wiederhergestellt. Ohne bekannten Stand
-    gilt die Grundbelegung der Integra: Diagonale IN n -> OUT n an, Rest aus.
-    Die Entitäten sind standardmäßig ausgeblendet (für die Matrix-Karte gedacht).
+    Zustand kommt vom Gerät: Die Matrix wird bei jedem Abfragezyklus per ASCII
+    gelesen (get:mixer#switch, am Gerät verifiziert) – damit folgen die
+    Schalter auch Preset-Wechseln und Änderungen in der Work-Software.
+    Schalten erfolgt über das DSP-Protokoll; der gesendete Wert wird kurz
+    gegen ältere Abfragewerte geschützt. Bis zur ersten Abfrage gilt der
+    zuletzt bekannte Zustand (bzw. die Grundbelegung IN n -> OUT n).
+    Standardmäßig ausgeblendet (für die Matrix-Karte gedacht).
     """
 
     _attr_has_entity_name = True
     _attr_icon = "mdi:matrix"
-    _attr_assumed_state = True
     _attr_entity_registry_visible_default = False
 
     def __init__(
         self, coordinator: IntegraCoordinator, entry: ConfigEntry, inp: int, out: int
     ) -> None:
-        self._coordinator = coordinator
+        super().__init__(coordinator)
         self._inp = inp
         self._out = out
+        self._key = (inp - 1, out - 1)
+        self._fallback: bool = inp == out
         in_name = coordinator.channel_name("input", inp - 1, entry.options)
         out_name = coordinator.channel_name("output", out - 1, entry.options)
         self._attr_unique_id = f"{entry.entry_id}_matrix_{inp}_{out}"
         self._attr_name = f"Matrix {in_name} → {out_name}"
-        self._attr_is_on = None
         self._attr_extra_state_attributes = {
             "matrix_input": inp,
             "matrix_output": out,
@@ -137,13 +137,10 @@ class IntegraMatrixPoint(RestoreEntity, SwitchEntity):
         await super().async_added_to_hass()
         last = await self.async_get_last_state()
         if last is not None and last.state in ("on", "off"):
-            self._attr_is_on = last.state == "on"
-        else:
-            self._attr_is_on = self._inp == self._out  # Grundbelegung: Diagonale
-        dsp = self._coordinator.dsp
+            self._fallback = last.state == "on"
+        dsp = self.coordinator.dsp
         if dsp is not None:
             self.async_on_remove(dsp.add_push_listener(self._on_push))
-            self.async_on_remove(dsp.add_availability_listener(self._on_availability))
 
     @callback
     def _on_push(self, change: dict) -> None:
@@ -152,17 +149,13 @@ class IntegraMatrixPoint(RestoreEntity, SwitchEntity):
             and change.get("input") == self._inp
             and change.get("output") == self._out
         ):
-            self._attr_is_on = bool(change.get("value"))
+            self.coordinator.set_optimistic("matrix", self._key, bool(change.get("value")))
             self.async_write_ha_state()
 
-    @callback
-    def _on_availability(self, _available: bool) -> None:
-        self.async_write_ha_state()
-
     @property
-    def available(self) -> bool:
-        dsp = self._coordinator.dsp
-        return dsp is not None and dsp.available
+    def is_on(self) -> bool | None:
+        matrix = (self.coordinator.data or {}).get("matrix", {})
+        return matrix.get(self._key, self._fallback)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._set(True)
@@ -171,12 +164,12 @@ class IntegraMatrixPoint(RestoreEntity, SwitchEntity):
         await self._set(False)
 
     async def _set(self, on: bool) -> None:
-        dsp = self._coordinator.dsp
+        dsp = self.coordinator.dsp
         if dsp is None:
             raise HomeAssistantError("DSP-Protokoll ist nicht aktiv.")
         try:
-            dsp.set_matrix(self._inp, self._out, on)
+            dsp.set_matrix(self._inp, self._out, on)   # meldet lokal -> _on_push
         except IntegraDspError as err:
             raise HomeAssistantError(str(err)) from err
-        self._attr_is_on = on
+        self.coordinator.set_optimistic("matrix", self._key, on)
         self.async_write_ha_state()

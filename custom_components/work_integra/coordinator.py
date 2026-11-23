@@ -9,19 +9,20 @@ längerer echter Funkstille wird auf "nicht verfügbar" umgeschaltet.
 from __future__ import annotations
 
 import logging
+import time
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, SCAN_INTERVAL
+from .const import DOMAIN, OPTIMISTIC_HOLD_SECONDS, SCAN_INTERVAL
 from .integra import IntegraClient, IntegraError
 from .integra_bin import IntegraDspClient
 
 _LOGGER = logging.getLogger(__name__)
 
 # Nach so vielen aufeinanderfolgenden komplett fehlgeschlagenen Polls gilt das
-# Gerät als offline (bei 10 s Intervall ~1 Minute).
-_MAX_CONSECUTIVE_FAILS = 6
+# Gerät als offline (bei 2 s Intervall ~1 Minute).
+_MAX_CONSECUTIVE_FAILS = 30
 
 
 class IntegraCoordinator(DataUpdateCoordinator):
@@ -48,8 +49,12 @@ class IntegraCoordinator(DataUpdateCoordinator):
         # Letzter erfolgreich gelesener Zustand (bleibt bei Aussetzern erhalten).
         self._last_good: dict = {}
         self._fail_count = 0
+        # Zuletzt aus HA gesendete Werte: (key, channel) -> (gültig bis, Wert)
+        self._hold: dict[tuple[str, int], tuple[float, object]] = {}
         # Client für das binäre DSP-Protokoll (wird in async_setup_entry gesetzt).
         self.dsp: IntegraDspClient | None = None
+        # Preset-Namen vom Gerät (get:scene#name), in async_setup_entry gelesen
+        self.scene_names: list[str] = []
 
     def channel_name(self, kind: str, channel: int, options: dict) -> str:
         override = options.get(f"{kind}_name_{channel}")
@@ -60,6 +65,21 @@ class IntegraCoordinator(DataUpdateCoordinator):
             return device
         label = "Input" if kind == "input" else "Output"
         return f"{label} {channel + 1}"
+
+    def set_optimistic(self, key: str, channel: int, value) -> None:
+        """Merkt einen aus HA gesendeten Wert und zeigt ihn sofort an."""
+        self._hold[(key, channel)] = (time.monotonic() + OPTIMISTIC_HOLD_SECONDS, value)
+        if self.data is not None:
+            self.data.setdefault(key, {})[channel] = value
+        self._last_good.setdefault(key, {})[channel] = value
+
+    def _apply_hold(self, data: dict) -> None:
+        now = time.monotonic()
+        for (key, channel), (until, value) in list(self._hold.items()):
+            if now > until:
+                del self._hold[(key, channel)]
+            else:
+                data.setdefault(key, {})[channel] = value
 
     async def _async_update_data(self) -> dict:
         """Periodischer Abruf mit Verlust-Toleranz.
@@ -87,7 +107,23 @@ class IntegraCoordinator(DataUpdateCoordinator):
             await fetch("input_gain", self.client.get_input_gains(0, last))
             await fetch("input_mute", self.client.get_input_mutes(0, last))
 
+        # Routing-Matrix: je Ausgang eine Abfrage (Eingänge 0..n-1)
+        if self.inputs and self.outputs:
+            matrix = dict(data.get("matrix", {}))
+            matrix_ok = False
+            for out in range(self.outputs):
+                try:
+                    for inp, on in (await self.client.get_matrix_output(out, self.inputs)).items():
+                        matrix[(inp, out)] = on
+                    matrix_ok = True
+                except IntegraError as err:
+                    _LOGGER.debug("Matrix-Abfrage Ausgang %d fehlgeschlagen: %s", out + 1, err)
+            if matrix_ok:
+                data["matrix"] = matrix
+                got_something = True
+
         if got_something:
+            self._apply_hold(data)
             self._fail_count = 0
             self._last_good = data
             return data

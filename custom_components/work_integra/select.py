@@ -16,6 +16,19 @@ from .services import async_recall_preset
 PRESET_OPTIONS = [f"Preset {n}" for n in range(1, PRESET_COUNT + 1)]
 
 
+def preset_options(names: list[str]) -> list[str]:
+    """Optionen aus den Preset-Namen des Geräts (eindeutig gemacht), sonst Preset 1..16."""
+    if not names:
+        return list(PRESET_OPTIONS)
+    out: list[str] = []
+    for n, name in enumerate(names[:PRESET_COUNT], start=1):
+        label = name or f"Preset {n}"
+        if label in out:
+            label = f"{label} ({n})"
+        out.append(label)
+    return out
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -36,10 +49,10 @@ class IntegraPresetSelect(RestoreEntity, SelectEntity):
     _attr_has_entity_name = True
     _attr_name = "Preset"
     _attr_icon = "mdi:playlist-music"
-    _attr_options = PRESET_OPTIONS
 
     def __init__(self, coordinator: IntegraCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
+        self._attr_options = preset_options(coordinator.scene_names)
         self._attr_unique_id = f"{entry.entry_id}_preset"
         self._attr_current_option = None
         self._attr_device_info = DeviceInfo(
@@ -52,7 +65,7 @@ class IntegraPresetSelect(RestoreEntity, SelectEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         last = await self.async_get_last_state()
-        if last is not None and last.state in PRESET_OPTIONS:
+        if last is not None and last.state in self._attr_options:
             self._attr_current_option = last.state
         dsp = self._coordinator.dsp
         if dsp is not None:
@@ -68,7 +81,7 @@ class IntegraPresetSelect(RestoreEntity, SelectEntity):
         return dsp is not None and dsp.available
 
     async def async_select_option(self, option: str) -> None:
-        preset = PRESET_OPTIONS.index(option) + 1
+        preset = self._attr_options.index(option) + 1
         await async_recall_preset(self._coordinator, preset)
         self._attr_current_option = option
         self.async_write_ha_state()

@@ -255,6 +255,34 @@ def parse_input_eq(image: bytes, inputs: int) -> dict[tuple, float | bool]:
     return result
 
 
+# Kompressor je Eingang: Block à 88 Byte ab 0x0812 (am Gerät verifiziert):
+#   +0 u16 ?, +2 u16 ?, +4 u16 ?, +6 i16 Threshold ×0,01 dB, +8 u16 Ratio ×0,01,
+#   +10 u16 Attack ms, +12 u16 Release ms
+# Gibt den Stand des zuletzt GELADENEN Presets wieder (nicht live) -> nur
+# direkt nach einem Preset-Abruf auswerten.
+IMG_IN_COMP_BASE = 0x0812
+IMG_IN_COMP_STRIDE = 88
+
+
+def parse_input_comp(image: bytes, inputs: int) -> dict[tuple, float]:
+    """Kompressorwerte aller Eingänge aus dem Abbild (Schlüssel: (Kanal, Parameter))."""
+    result: dict[tuple, float] = {}
+    for ch in range(1, inputs + 1):
+        base = IMG_IN_COMP_BASE + IMG_IN_COMP_STRIDE * (ch - 1)
+        if len(image) < base + 14:
+            break
+        thr, ratio, attack, release = struct.unpack_from("<hHHH", image, base + 6)
+        if -9000 <= thr <= 2000:
+            result[(ch, "threshold")] = thr / 100
+        if 100 <= ratio <= 10000:
+            result[(ch, "ratio")] = ratio / 100
+        if 1 <= attack <= 30000:
+            result[(ch, "attack")] = attack
+        if 1 <= release <= 30000:
+            result[(ch, "release")] = release
+    return result
+
+
 def eq_change_event(key: tuple, value) -> dict:
     """Baut aus einem Abbild-Wert eine Meldung im Format von decode_set."""
     ch, band, param = key
@@ -365,10 +393,18 @@ class IntegraDspClient:
                           self.info.get("name"), self.info.get("firmware"))
             self._publish_image_state()
 
-    async def refresh_state(self) -> None:
-        """Liest das Abbild neu (z. B. nach Preset-Abruf) und meldet Änderungen."""
+    async def refresh_state(self, include_compressor: bool = False) -> None:
+        """Liest das Abbild neu und meldet Änderungen.
+
+        include_compressor: nur direkt nach einem Preset-Abruf sinnvoll – dann
+        entspricht der Kompressorbereich des Abbilds dem geladenen Preset.
+        """
         self.image = await self.read_image()
         self._publish_image_state()
+        if include_compressor:
+            for (ch, param), value in parse_input_comp(self.image, self.input_count).items():
+                self._notify_push({"kind": "compressor", "side": "input", "channel": ch,
+                                   "param": param, "value": value, "source": "preset"})
 
     def _publish_image_state(self) -> None:
         """Meldet EQ-Werte aus dem Abbild, die sich gegenüber dem letzten Stand geändert haben."""
@@ -499,7 +535,7 @@ class IntegraDspClient:
         await self._request(build_frame(CMD_RECALL, struct.pack("<I", preset - 1)), CMD_RECALL + 1)
         await asyncio.sleep(0.5)  # Gerät lädt das Preset
         try:
-            await self.refresh_state()
+            await self.refresh_state(include_compressor=True)
         except IntegraDspError as err:
             _LOGGER.debug("Abbild nach Preset-Abruf nicht lesbar: %s", err)
 

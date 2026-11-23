@@ -91,13 +91,15 @@ class IntegraClient:
         if self._transport is None:
             raise IntegraError("Nicht verbunden — connect() zuerst aufrufen.")
 
+        if not expect_reply:
+            # Set-Befehle sofort senden – nicht hinter einer laufenden Abfrage
+            # warten (Echtzeit beim Ziehen eines Faders). Ein UDP-Datagramm ist
+            # atomar; eine offene get-Abfrage bleibt davon unberührt.
+            self._transport.sendto(command.encode("utf-8"))
+            return None
+
         async with self._lock:
             loop = asyncio.get_running_loop()
-
-            if not expect_reply:
-                self._pending = None
-                self._transport.sendto(command.encode("utf-8"))
-                return None
 
             for attempt in range(1, retries + 1):
                 self._pending = loop.create_future()
@@ -243,6 +245,39 @@ class IntegraClient:
             raise IntegraError("Keine Antwort auf get:output#name")
         s, _e, values = self._parse_values(reply)
         return {s + i: v for i, v in enumerate(values)}
+
+    # --- Matrix (am Gerät verifiziert, Integra 8S) -----------------------
+    # Antwort: "get:mixer#switch#<Eingänge>#<Ausgang>#<Wert je Eingang>…"
+
+    async def get_matrix_output(self, output: int, inputs: int) -> dict[int, bool]:
+        """Liest, welche Eingänge (0-basiert) auf einen Ausgang (0-basiert) geroutet sind."""
+        spec = f"0-{inputs - 1}"
+        reply = await self._command(
+            f"get:mixer#switch#{spec}#{output}", expect_token=f"mixer#switch#{spec}#{output}#"
+        )
+        if reply is None:
+            raise IntegraError("Keine Antwort auf get:mixer#switch")
+        parts = reply.split("#")
+        try:
+            i = parts.index("switch")
+        except ValueError as err:
+            raise IntegraError(f"Unerwartete Matrix-Antwort: {reply!r}") from err
+        start = int(parts[i + 1].split("-")[0])
+        values = parts[i + 3:]
+        result = {start + k: v.strip() == "1" for k, v in enumerate(values) if v.strip() in ("0", "1")}
+        if not result:
+            raise IntegraError(f"Matrix-Antwort ohne Werte: {reply!r}")
+        return result
+
+    async def get_scene_names(self, count: int = 16) -> list[str]:
+        """Namen der Preset-Speicherplätze (wie in der Work-Software benannt)."""
+        reply = await self._command(
+            f"get:scene#name#0-{count - 1}", expect_token=f"scene#name#0-{count - 1}"
+        )
+        if reply is None:
+            raise IntegraError("Keine Antwort auf get:scene#name")
+        _s, _e, values = self._parse_values(reply)
+        return [v.strip() for v in values][:count]
 
     # --- Szenen / System ------------------------------------------------
 

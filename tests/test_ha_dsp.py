@@ -27,15 +27,21 @@ async def fake_device():
 
 def _ascii_mocks():
     """ASCII-Client (Gain/Mute) wird gemockt – getestet wird hier nur der DSP-Teil."""
-    vals = {i: 0.0 for i in range(2)}
-    mutes = {i: False for i in range(2)}
+    def vals(*_a):
+        return {i: 0.0 for i in range(2)}
+
+    def mutes(*_a):
+        return {i: False for i in range(2)}
+
     return {
         "connect": AsyncMock(),
-        "get_output_gains": AsyncMock(return_value=vals),
-        "get_input_gains": AsyncMock(return_value=vals),
-        "get_output_mutes": AsyncMock(return_value=mutes),
-        "get_input_mutes": AsyncMock(return_value=mutes),
+        "get_output_gains": AsyncMock(side_effect=vals),
+        "get_input_gains": AsyncMock(side_effect=vals),
+        "get_output_mutes": AsyncMock(side_effect=mutes),
+        "get_input_mutes": AsyncMock(side_effect=mutes),
         "get_input_names": AsyncMock(return_value={0: "Funk Hand", 1: "Funk Headset"}),
+        "get_matrix_output": AsyncMock(side_effect=lambda out, n: {i: i == out for i in range(n)}),
+        "get_scene_names": AsyncMock(return_value=[f"Preset {n}" for n in range(1, 16)] + ["Gottesdienst"]),
         "get_output_names": AsyncMock(return_value={0: "LS Vorne", 1: "LS Mitte"}),
     }
 
@@ -188,36 +194,48 @@ async def test_eq_card_skipped_without_frontend(hass):
 
 async def test_matrix_switches(hass, fake_device):
     fake, port = fake_device
-    entry, _ = await _setup(hass, port)
+    entry, mocks = await _setup(hass, port)
+    coord = hass.data[DOMAIN][entry.entry_id]
     eid = "switch.integra_127_0_0_1_matrix_funk_hand_ls_mitte"
     st = hass.states.get(eid)
     assert st is not None and st.attributes["matrix_input"] == 1 and st.attributes["matrix_output"] == 2
-    assert st.state == "off"  # Grundbelegung: nur Diagonale an
+    assert st.state == "off"   # vom Gerät gelesen: Diagonale
     assert hass.states.get("switch.integra_127_0_0_1_matrix_funk_hand_ls_vorne").state == "on"
 
-    await hass.services.async_call("switch", "turn_on", {"entity_id": eid}, blocking=True)
-    await asyncio.sleep(0.1)
-    assert _sets(fake)[-1] == bytes.fromhex("a600010000010100")
-    assert hass.states.get(eid).state == "on"
+    with patch.multiple("custom_components.work_integra.integra.IntegraClient", **mocks):
+        await hass.services.async_call("switch", "turn_on", {"entity_id": eid}, blocking=True)
+        await asyncio.sleep(0.1)
+        assert _sets(fake)[-1] == bytes.fromhex("a600010000010100")
+        assert hass.states.get(eid).state == "on"
+        await coord.async_refresh()          # Gerät meldet noch den alten Stand -> Haltezeit
+        await hass.async_block_till_done()
+        assert hass.states.get(eid).state == "on"
 
-    # Dienst set_matrix aktualisiert den Schalter ebenfalls
-    await hass.services.async_call(DOMAIN, "set_matrix", {"input": 1, "output": 2, "enabled": False}, blocking=True)
-    await hass.async_block_till_done()
-    assert hass.states.get(eid).state == "off"
+        # Preset-Wechsel o. Ä.: Gerät meldet neue Matrix -> Schalter folgt nach Haltezeit
+        for k in list(coord._hold):
+            coord._hold[k] = (0, coord._hold[k][1])
+        mocks["get_matrix_output"].side_effect = lambda out, n: {i: True for i in range(n)}
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(eid).state == "on"
+        mocks["get_matrix_output"].side_effect = lambda out, n: {i: False for i in range(n)}
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(eid).state == "off"
+        assert hass.states.get("switch.integra_127_0_0_1_matrix_funk_hand_ls_vorne").state == "off"
 
-    # Änderung aus der Work-Software (anderer Client) -> Schalter folgt
-    other = ib.IntegraDspClient("127.0.0.1", port)
-    await other.connect(keepalive=False)
-    other.send_set(ib.MOD_MATRIX, ib.MATRIX_POINT, 0x0100, 1)
-    await asyncio.sleep(0.2)
-    await hass.async_block_till_done()
-    other.close()
-    assert hass.states.get(eid).state == "on"
+        # Änderung aus der Work-Software (anderer Client) -> sofort sichtbar
+        other = ib.IntegraDspClient("127.0.0.1", port)
+        await other.connect(keepalive=False)
+        other.send_set(ib.MOD_MATRIX, ib.MATRIX_POINT, 0x0100, 1)
+        await asyncio.sleep(0.2)
+        await hass.async_block_till_done()
+        other.close()
+        assert hass.states.get(eid).state == "on"
 
     matrix = [s for s in hass.states.async_all("switch") if "matrix_input" in s.attributes]
-    assert len(matrix) == 4  # 2 Eingänge x 2 Ausgänge im Test
+    assert len(matrix) == 4
     assert await hass.config_entries.async_unload(entry.entry_id)
-
 
 async def test_read_dsp_reports_eq_from_device(hass, fake_device):
     from .test_integra_bin import make_image
@@ -233,4 +251,51 @@ async def test_read_dsp_reports_eq_from_device(hass, fake_device):
     assert got[(1, 2, "frequency")] == 642 and got[(1, 2, "gain")] == 13.0 and got[(1, 2, "q")] == 6.89
     assert got[(1, 0, "bypass")] is False
     assert len(got) == 2 * 25          # 2 Eingänge im Test
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_fader_holds_value_against_stale_poll(hass, fake_device):
+    """Echtzeit-Fader: ein älterer Poll-Wert darf den gerade gesetzten Wert nicht überschreiben."""
+    fake, port = fake_device
+    entry, mocks = await _setup(hass, port)
+    eid = "number.integra_127_0_0_1_ls_vorne_lautstarke"
+    coord = hass.data[DOMAIN][entry.entry_id]
+    with patch.multiple("custom_components.work_integra.integra.IntegraClient", **mocks), \
+         patch("custom_components.work_integra.integra.IntegraClient.set_output_gain", AsyncMock()) as setg:
+        await hass.services.async_call("number", "set_value", {"entity_id": eid, "value": -12.5}, blocking=True)
+        assert hass.states.get(eid).state == "-12.5"
+        await coord.async_refresh()           # Gerät meldet noch den alten Wert 0.0
+        await hass.async_block_till_done()
+        assert hass.states.get(eid).state == "-12.5"
+        setg.assert_awaited_once_with(0, -12.5)
+        # Nach Ablauf der Haltezeit gilt wieder der Gerätewert
+        for k in list(coord._hold):
+            coord._hold[k] = (0, coord._hold[k][1])
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(eid).state == "0.0"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+
+async def test_preset_names_and_compressor_after_recall(hass, fake_device):
+    from .test_integra_bin import make_image
+
+    fake, port = fake_device
+    preset2 = make_image()
+    import struct as _st
+    _st.pack_into("<hHHH", preset2, ib.IMG_IN_COMP_BASE + 6, -2146, 120, 30, 1500)
+    fake.presets[15] = preset2
+    entry, mocks = await _setup(hass, port)
+    sel = hass.states.get("select.integra_127_0_0_1_preset")
+    assert sel.attributes["options"][15] == "Gottesdienst"
+    events = async_capture_events(hass, EVENT_DSP_CHANGED)
+    with patch.multiple("custom_components.work_integra.integra.IntegraClient", **mocks), \
+         patch("custom_components.work_integra.services.asyncio.sleep", AsyncMock()):
+        await hass.services.async_call("select", "select_option", {
+            "entity_id": "select.integra_127_0_0_1_preset", "option": "Gottesdienst"}, blocking=True)
+        await hass.async_block_till_done()
+    comp = {e.data["param"]: e.data["value"] for e in events
+            if e.data.get("kind") == "compressor" and e.data["channel"] == 1}
+    assert comp == {"threshold": -21.46, "ratio": 1.2, "attack": 30, "release": 1500}
     assert await hass.config_entries.async_unload(entry.entry_id)
