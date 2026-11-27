@@ -175,7 +175,13 @@ outputs: [Saal L, Saal R, Oben L, Oben R, Sub, Aufnahme, Out 7, Out 8]          
 min_db: -60
 max_db: 0
 height: 220
+input_channels: [1, 2, 3, 4, 7, 8]   # optional: show only these inputs (1-based)
+output_channels: [1, 2, 3, 4, 5]     # optional: show only these outputs
 ```
+
+Without `inputs`/`outputs` the card uses the channel names from the integration
+options. Names in `inputs`/`outputs` always refer to channel 1…8, also when only
+some channels are shown.
 
 ### Routing matrix
 
@@ -195,6 +201,13 @@ entity_prefix: switch.integra   # optional: only this device's crosspoints
 
 The card shows inputs as rows and outputs as columns; tap a crosspoint to switch
 it.
+
+### Changing the IP address
+
+*Settings → Devices & services → Work Pro Integra → ⋮ → Reconfigure* changes the
+IP address and ports of an existing entry. Entity IDs, channel names, dashboards
+and automations stay as they are (entities are keyed by the config entry, not by
+the IP address).
 
 ### Live updates
 

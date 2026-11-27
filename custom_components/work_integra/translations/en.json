@@ -11,13 +11,23 @@
           "inputs": "Number of input channels",
           "dsp_port": "UDP port DSP protocol (EQ/presets)"
         }
+      },
+      "reconfigure": {
+        "title": "Reconnect Integra",
+        "description": "New IP address or ports of the Integra. Entities, channel names and dashboards are kept.",
+        "data": {
+          "host": "IP address",
+          "port": "UDP port",
+          "dsp_port": "UDP port DSP protocol (EQ/presets)"
+        }
       }
     },
     "error": {
       "cannot_connect": "Connection failed. Check IP, port and whether \"central control reply\" is enabled on the device."
     },
     "abort": {
-      "already_configured": "This Integra is already configured."
+      "already_configured": "This Integra is already configured.",
+      "reconfigure_successful": "The new connection has been saved."
     }
   },
   "options": {

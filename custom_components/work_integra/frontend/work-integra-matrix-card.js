@@ -10,7 +10,7 @@
  * Kreuzpunkt antippen = ein/aus.
  */
 
-const MATRIX_VERSION = "1.7.0";
+const MATRIX_VERSION = "1.7.1";
 const ROW_COLORS = ["#ff4d4d", "#ff9f1a", "#ffd60a", "#4cd964", "#2ee6d6", "#3d9bff", "#9b6bff", "#ff5fd2"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 

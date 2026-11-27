@@ -64,6 +64,45 @@ class IntegraConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
+    async def async_step_reconfigure(self, user_input=None) -> ConfigFlowResult:
+        """IP-Adresse/Ports nachträglich ändern – Entitäten, Namen und Dashboards bleiben."""
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            host = user_input[CONF_HOST].strip()
+            client = IntegraClient(host, user_input[CONF_PORT])
+            try:
+                await client.connect()
+                await client.get_output_gains(0, 0)  # Verbindungstest
+            except (IntegraError, OSError):
+                errors["base"] = "cannot_connect"
+            finally:
+                client.close()
+
+            if not errors:
+                for other in self._async_current_entries(include_ignore=False):
+                    if other.entry_id != entry.entry_id and other.unique_id == host:
+                        return self.async_abort(reason="already_configured")
+                return self.async_update_reload_and_abort(
+                    entry,
+                    unique_id=host,
+                    title=f"Integra ({host})",
+                    data_updates={**user_input, CONF_HOST: host},
+                )
+
+        data = {**entry.data, **(user_input or {})}
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST, default=data[CONF_HOST]): str,
+                vol.Required(CONF_PORT, default=data.get(CONF_PORT, DEFAULT_PORT)): int,
+                vol.Optional(
+                    CONF_DSP_PORT, default=data.get(CONF_DSP_PORT, DEFAULT_DSP_PORT)
+                ): int,
+            }
+        )
+        return self.async_show_form(step_id="reconfigure", data_schema=schema, errors=errors)
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:

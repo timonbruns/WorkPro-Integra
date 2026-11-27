@@ -325,3 +325,42 @@ async def test_meter_stream_via_websocket(hass, hass_ws_client, fake_device):
         await asyncio.sleep(0.15)
         assert coord.meters._task is None                 # Abfrage stoppt ohne Zuschauer
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_reconfigure_changes_host_keeps_entities(hass, fake_device):
+    _fake, port = fake_device
+    entry, _mocks = await _setup(hass, port)
+    eid = "number.integra_127_0_0_1_ls_vorne_lautstarke"
+    from homeassistant.helpers import entity_registry as er
+    ent_reg = er.async_get(hass)
+    uid_before = ent_reg.async_get(eid).unique_id
+
+    with patch.multiple("custom_components.work_integra.integra.IntegraClient", **_ascii_mocks()):
+        result = await entry.start_reconfigure_flow(hass)
+        assert result["step_id"] == "reconfigure"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"host": " 127.0.0.2 ", "port": 50000, "dsp_port": port}
+        )
+        await hass.async_block_till_done()
+    assert result["type"] == "abort" and result["reason"] == "reconfigure_successful"
+    assert entry.data["host"] == "127.0.0.2"
+    assert entry.unique_id == "127.0.0.2"
+    assert entry.title == "Integra (127.0.0.2)"
+    # gleiche Entität (gleiche ID und unique_id) – Dashboards bleiben gültig
+    assert ent_reg.async_get(eid).unique_id == uid_before
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_reconfigure_rejects_unreachable_host(hass, fake_device):
+    _fake, port = fake_device
+    entry, _ = await _setup(hass, port)
+    from custom_components.work_integra.integra import IntegraError
+    with patch.multiple("custom_components.work_integra.integra.IntegraClient",
+                        connect=AsyncMock(side_effect=IntegraError("x"))):
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"host": "10.0.0.9", "port": 50000, "dsp_port": port}
+        )
+    assert result["type"] == "form" and result["errors"] == {"base": "cannot_connect"}
+    assert entry.data["host"] == "127.0.0.1"
+    assert await hass.config_entries.async_unload(entry.entry_id)

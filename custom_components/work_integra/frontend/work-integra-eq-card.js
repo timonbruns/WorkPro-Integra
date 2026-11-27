@@ -18,7 +18,7 @@
  * Regler unter der Grafik.
  */
 
-const VERSION = "1.7.0";
+const VERSION = "1.7.1";
 const COLORS = ["#ff4d4d", "#ff9f1a", "#ffd60a", "#4cd964", "#2ee6d6", "#3d9bff", "#9b6bff", "#ff5fd2"];
 const DEFAULT_FREQ = [60, 125, 500, 1000, 2000, 4000, 8000, 16000];
 const F_MIN = 20, F_MAX = 20000, Q_MIN = 0.1, Q_MAX = 20;
