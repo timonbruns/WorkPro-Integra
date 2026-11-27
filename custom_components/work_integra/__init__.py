@@ -118,6 +118,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data[CONF_HOST], entry.data.get(CONF_DSP_PORT, DEFAULT_DSP_PORT)
     )
     dsp.input_count = inputs
+    dsp.output_count = outputs
     coordinator.dsp = dsp
 
     @callback
@@ -136,7 +137,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Beim HA-Start sind Automationen evtl. noch nicht geladen, wenn die erste
         # Anmeldung den EQ meldet. Deshalb nach dem Start einmal komplett melden.
         if dsp.available or dsp.image is not None:
-            dsp.eq_state = {}
+            dsp.reset_eq_state()
             try:
                 await dsp.refresh_state()
             except IntegraDspError as err:

@@ -224,19 +224,17 @@ def decode_set(payload: bytes) -> dict | None:
 # Presets) und wird deshalb nicht ausgelesen.
 IMG_IN_EQ_BASE = 4882
 IMG_IN_EQ_STRIDE = 88
+# Ausgangs-PEQ: gleicher Blockaufbau, 16 Blöcke ab 10150 (in zwei Live-Abbildern
+# einer Integra 8S gefunden: Standardbänder 60 Hz … 16 kHz im selben Raster)
+IMG_OUT_EQ_BASE = 10150
 IMG_EQ_BAND_STRIDE = 10
 IMG_EQ_BANDS = 8
 
 
-def parse_input_eq(image: bytes, inputs: int) -> dict[tuple, float | bool]:
-    """Liest Bypass und Bänder aller Eingangs-EQs aus dem Speicherabbild.
-
-    Schlüssel: (Kanal, Band, Parameter) – Band 0 für den Bypass des Kanals.
-    Unplausible Werte werden ausgelassen.
-    """
+def _parse_eq_blocks(image: bytes, base0: int, count: int) -> dict[tuple, float | bool]:
     result: dict[tuple, float | bool] = {}
-    for ch in range(1, inputs + 1):
-        base = IMG_IN_EQ_BASE + IMG_IN_EQ_STRIDE * (ch - 1)
+    for ch in range(1, count + 1):
+        base = base0 + IMG_IN_EQ_STRIDE * (ch - 1)
         end = base + 4 + IMG_EQ_BAND_STRIDE * IMG_EQ_BANDS
         if len(image) < end:
             break
@@ -253,6 +251,20 @@ def parse_input_eq(image: bytes, inputs: int) -> dict[tuple, float | bool]:
             if 1 <= q <= 10000:
                 result[(ch, band, "q")] = q / 100
     return result
+
+
+def parse_input_eq(image: bytes, inputs: int) -> dict[tuple, float | bool]:
+    """Liest Bypass und Bänder aller Eingangs-EQs aus dem Speicherabbild.
+
+    Schlüssel: (Kanal, Band, Parameter) – Band 0 für den Bypass des Kanals.
+    Unplausible Werte werden ausgelassen.
+    """
+    return _parse_eq_blocks(image, IMG_IN_EQ_BASE, inputs)
+
+
+def parse_output_eq(image: bytes, outputs: int) -> dict[tuple, float | bool]:
+    """Wie parse_input_eq, für die Ausgangs-EQs."""
+    return _parse_eq_blocks(image, IMG_OUT_EQ_BASE, outputs)
 
 
 # Kompressor je Eingang: Block à 88 Byte ab 0x0812 (am Gerät verifiziert):
@@ -283,10 +295,10 @@ def parse_input_comp(image: bytes, inputs: int) -> dict[tuple, float]:
     return result
 
 
-def eq_change_event(key: tuple, value) -> dict:
+def eq_change_event(key: tuple, value, side: str = "input") -> dict:
     """Baut aus einem Abbild-Wert eine Meldung im Format von decode_set."""
     ch, band, param = key
-    event = {"kind": "peq", "side": "input", "channel": ch, "param": param,
+    event = {"kind": "peq", "side": side, "channel": ch, "param": param,
              "value": value, "source": "image"}
     if band:
         event["band"] = band
@@ -330,7 +342,10 @@ class IntegraDspClient:
         self.info: dict | None = None
         self.image: bytes | None = None
         self.input_count = 16           # wird von der Integration gesetzt
-        self.eq_state: dict[tuple, float | bool] = {}
+        self.eq_state: dict[tuple, float | bool] = {}       # Eingänge
+        self.out_eq_state: dict[tuple, float | bool] = {}   # Ausgänge
+        self.output_count = 16          # wird von der Integration gesetzt
+        self._eq_listeners: list = []
         self._push_listeners: list[Callable[[dict], None]] = []
         self._availability_listeners: list[Callable[[bool], None]] = []
         self._available = False
@@ -413,8 +428,46 @@ class IntegraDspClient:
         new = parse_input_eq(self.image, self.input_count)
         for key, value in new.items():
             if self.eq_state.get(key) != value:
-                self._notify_push(eq_change_event(key, value))
+                event = eq_change_event(key, value)
+                self._notify_push(event)
+                self._notify_eq(event)
         self.eq_state = new
+        new_out = parse_output_eq(self.image, self.output_count)
+        for key, value in new_out.items():
+            if self.out_eq_state.get(key) != value:
+                event = eq_change_event(key, value, "output")
+                self._notify_push(event)
+                self._notify_eq(event)
+        self.out_eq_state = new_out
+
+    def reset_eq_state(self) -> None:
+        """Vergisst den EQ-Stand, damit der nächste Abgleich alle Werte meldet."""
+        self.eq_state = {}
+        self.out_eq_state = {}
+
+    def eq_snapshot(self) -> dict:
+        """EQ aller Kanäle: {"input": {ch: {"bypass": b, "bands": {n: {...}}}}, "output": {...}}."""
+        out: dict = {"input": {}, "output": {}}
+        for side, state in (("input", self.eq_state), ("output", self.out_eq_state)):
+            for (ch, band, param), value in state.items():
+                chan = out[side].setdefault(ch, {"bypass": None, "bands": {}})
+                if band == 0:
+                    chan["bypass"] = value
+                else:
+                    chan["bands"].setdefault(band, {})[param] = value
+        return out
+
+    def add_eq_listener(self, cb) -> Callable[[], None]:
+        """Meldet jede EQ-Änderung (vom Gerät, aus dem Abbild und eigene Sendungen)."""
+        self._eq_listeners.append(cb)
+        return lambda: self._eq_listeners.remove(cb) if cb in self._eq_listeners else None
+
+    def _notify_eq(self, event: dict) -> None:
+        for cb in list(self._eq_listeners):
+            try:
+                cb(event)
+            except Exception:  # pragma: no cover
+                _LOGGER.exception("Fehler im EQ-Listener")
 
     def _session_alive(self) -> bool:
         return time.monotonic() - self._last_session <= _OFFLINE_AFTER
@@ -621,9 +674,10 @@ class IntegraDspClient:
             self._notify_push({**decoded, "local": True})
 
     def _track_eq(self, d: dict) -> None:
-        if (d.get("kind") == "peq" and d.get("side") == "input"
-                and d["param"] in ("frequency", "gain", "q", "bypass")):
-            self.eq_state[(d["channel"], d.get("band", 0), d["param"])] = d["value"]
+        if d.get("kind") == "peq" and d["param"] in ("frequency", "gain", "q", "bypass"):
+            state = self.eq_state if d.get("side") == "input" else self.out_eq_state
+            state[(d["channel"], d.get("band", 0), d["param"])] = d["value"]
+            self._notify_eq(d)
 
     def _notify_push(self, decoded: dict) -> None:
         for cb in list(self._push_listeners):

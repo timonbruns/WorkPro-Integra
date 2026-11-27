@@ -138,7 +138,26 @@ height: 300        # optional, px
   `bands: [{gain: input_number.a, frequency: input_number.b, q: input_number.c}, …]`
   and `bypass: input_boolean.x`.
 
-The card writes to helper entities; an automation forwards helper changes to
+**Direct mode with source selection (no helpers, no automations):**
+
+```yaml
+type: custom:work-integra-eq-card
+title: Equalizer
+source_select: true
+input_channels: [1, 2, 3, 4, 7, 8]   # optional, 1-based
+output_channels: [1, 2, 3, 4, 5]     # optional
+side: input                          # optional start selection
+channel: 1
+```
+
+On top of the card you pick *Eingänge / Ausgänge* and the channel (names from the
+integration options). The card subscribes to `work_integra/subscribe_eq`: first the
+complete EQ of all inputs and outputs (read from the device image), then every
+change – from the device, from other clients and from other tablets. Changes are
+sent directly with `work_integra.set_peq` while dragging. The output EQ is read
+from the image at offset 10150 (same 88-byte block layout as the inputs).
+
+In helper mode the card writes to helper entities; an automation forwards helper changes to
 `work_integra.set_peq` (see the example under *Live updates*). The curve is
 calculated as peaking filters (RBJ cookbook, 48 kHz) – shelf/pass filter types
 are not modelled yet.

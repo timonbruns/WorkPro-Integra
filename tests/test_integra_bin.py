@@ -147,7 +147,7 @@ def test_real_replies_echo_request_checksum():
 DEFAULT_FREQ = [60, 125, 500, 1000, 2000, 4000, 8000, 16000]
 
 
-def make_image(eq=None):
+def make_image(eq=None, out_eq=None):
     """Speicherabbild wie von der Integra 8S (14954 Byte) mit Eingangs-EQs.
 
     eq: {(Kanal, Band): (Freq, Gain_dB, Q)} und {(Kanal, 0): bypass}
@@ -159,6 +159,13 @@ def make_image(eq=None):
         struct.pack_into("<HH", img, base, int(eq.get((ch, 0), 1)), 8)
         for b in range(1, 9):
             f, g, q = eq.get((ch, b), (DEFAULT_FREQ[b - 1], 0.0, 0.71))
+            struct.pack_into("<HHHhH", img, base + 4 + 10 * (b - 1), 1, 6, f, round(g * 100), round(q * 100))
+    out_eq = out_eq or {}
+    for ch in range(1, 9):
+        base = ib.IMG_OUT_EQ_BASE + ib.IMG_IN_EQ_STRIDE * (ch - 1)
+        struct.pack_into("<HH", img, base, int(out_eq.get((ch, 0), 1)), 8)
+        for b in range(1, 9):
+            f, g, q = out_eq.get((ch, b), (DEFAULT_FREQ[b - 1], 0.0, 0.71))
             struct.pack_into("<HHHhH", img, base + 4 + 10 * (b - 1), 1, 6, f, round(g * 100), round(q * 100))
     return img
 
@@ -324,19 +331,22 @@ def test_login_publishes_eq_and_recall_publishes_changes():
         fake.presets[1] = make_image({(1, 3): (1000, -2.0, 1.0), (1, 0): 0})
         c = ib.IntegraDspClient("127.0.0.1", port)
         c.input_count = 8
+        c.output_count = 8
         events = []
         c.add_push_listener(events.append)
         await c.connect()
         await asyncio.sleep(0.5)
-        img_events = [e for e in events if e.get("source") == "image"]
+        img_events = [e for e in events if e.get("source") == "image" and e["side"] == "input"]
         assert len(img_events) == 8 * 25
+        out_events = [e for e in events if e.get("source") == "image" and e["side"] == "output"]
+        assert {e["channel"] for e in out_events} == set(range(1, 9))
         assert {"channel": 1, "band": 3, "param": "gain", "value": 5.7} .items() <= next(
             e for e in img_events if e["channel"] == 1 and e.get("band") == 3 and e["param"] == "gain").items()
 
         events.clear()
         await c.recall_preset(2)
         changed = {(e["channel"], e.get("band", 0), e["param"]): e["value"]
-                   for e in events if e.get("source") == "image"}
+                   for e in events if e.get("source") == "image" and e["side"] == "input"}
         assert changed == {(1, 3, "frequency"): 1000, (1, 3, "gain"): -2.0, (1, 3, "q"): 1.0, (1, 0, "bypass"): False}
         comp = [e for e in events if e.get("source") == "preset"]
         assert comp and all(e["kind"] == "compressor" for e in comp)
@@ -350,3 +360,13 @@ def test_login_publishes_eq_and_recall_publishes_changes():
         t.close()
 
     _run(run())
+
+
+def test_parse_output_eq_from_image():
+    img = make_image(out_eq={(2, 3): (630, -4.5, 2.0), (2, 0): 0})
+    st = ib.parse_output_eq(bytes(img), 8)
+    assert st[(2, 3, "frequency")] == 630 and st[(2, 3, "gain")] == -4.5 and st[(2, 3, "q")] == 2.0
+    assert st[(2, 0, "bypass")] is False and st[(1, 0, "bypass")] is True
+    # Eingänge davon unberührt
+    assert ib.parse_input_eq(bytes(img), 8)[(2, 3, "frequency")] == 500
+

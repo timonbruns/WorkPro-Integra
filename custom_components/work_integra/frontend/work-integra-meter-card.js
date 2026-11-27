@@ -19,7 +19,7 @@
  * Integration – nur solange die Karte sichtbar ist. Keine Entitäten, kein Recorder.
  */
 
-const METER_VERSION = "1.7.1";
+const METER_VERSION = "1.8.0";
 const PEAK_HOLD_MS = 1500;
 const FALL_DB_PER_S = 30;      // Abfallgeschwindigkeit der Anzeige
 
