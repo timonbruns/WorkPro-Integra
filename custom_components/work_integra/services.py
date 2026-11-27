@@ -214,7 +214,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         for coord in _targets(hass, call):
             dsp = _dsp(coord)
             if call.data.get("full", True):
-                dsp.eq_state = {}
+                dsp.reset_eq_state()
             try:
                 await dsp.refresh_state()
             except IntegraDspError as err:

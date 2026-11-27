@@ -247,7 +247,7 @@ async def test_read_dsp_reports_eq_from_device(hass, fake_device):
     await hass.services.async_call(DOMAIN, "read_dsp", {}, blocking=True)
     await hass.async_block_till_done()
     got = {(e.data["channel"], e.data.get("band", 0), e.data["param"]): e.data["value"]
-           for e in events if e.data.get("source") == "image"}
+           for e in events if e.data.get("source") == "image" and e.data["side"] == "input"}
     assert got[(1, 2, "frequency")] == 642 and got[(1, 2, "gain")] == 13.0 and got[(1, 2, "q")] == 6.89
     assert got[(1, 0, "bypass")] is False
     assert len(got) == 2 * 25          # 2 Eingänge im Test
@@ -324,4 +324,69 @@ async def test_meter_stream_via_websocket(hass, hass_ws_client, fake_device):
         await ws.receive_json()
         await asyncio.sleep(0.15)
         assert coord.meters._task is None                 # Abfrage stoppt ohne Zuschauer
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_reconfigure_changes_host_keeps_entities(hass, fake_device):
+    _fake, port = fake_device
+    entry, _mocks = await _setup(hass, port)
+    eid = "number.integra_127_0_0_1_ls_vorne_lautstarke"
+    from homeassistant.helpers import entity_registry as er
+    ent_reg = er.async_get(hass)
+    uid_before = ent_reg.async_get(eid).unique_id
+
+    with patch.multiple("custom_components.work_integra.integra.IntegraClient", **_ascii_mocks()):
+        result = await entry.start_reconfigure_flow(hass)
+        assert result["step_id"] == "reconfigure"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"host": " 127.0.0.2 ", "port": 50000, "dsp_port": port}
+        )
+        await hass.async_block_till_done()
+    assert result["type"] == "abort" and result["reason"] == "reconfigure_successful"
+    assert entry.data["host"] == "127.0.0.2"
+    assert entry.unique_id == "127.0.0.2"
+    assert entry.title == "Integra (127.0.0.2)"
+    # gleiche Entität (gleiche ID und unique_id) – Dashboards bleiben gültig
+    assert ent_reg.async_get(eid).unique_id == uid_before
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_reconfigure_rejects_unreachable_host(hass, fake_device):
+    _fake, port = fake_device
+    entry, _ = await _setup(hass, port)
+    from custom_components.work_integra.integra import IntegraError
+    with patch.multiple("custom_components.work_integra.integra.IntegraClient",
+                        connect=AsyncMock(side_effect=IntegraError("x"))):
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"host": "10.0.0.9", "port": 50000, "dsp_port": port}
+        )
+    assert result["type"] == "form" and result["errors"] == {"base": "cannot_connect"}
+    assert entry.data["host"] == "127.0.0.1"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_eq_stream_snapshot_and_changes(hass, hass_ws_client, fake_device):
+    fake, port = fake_device
+    from .test_integra_bin import make_image
+    fake.image = make_image(eq={(1, 2): (150, 3.0, 1.0)}, out_eq={(2, 5): (2500, -6.0, 1.4), (2, 0): 0})
+    entry, _mocks = await _setup(hass, port)
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 7, "type": "work_integra/subscribe_eq"})
+    assert (await ws.receive_json())["success"] is True
+    snap = (await ws.receive_json())["event"]
+    assert snap["available"] is True
+    assert snap["names"]["out"] == ["LS Vorne", "LS Mitte"]
+    out2 = snap["snapshot"]["output"]["2"]
+    assert out2["bypass"] is False
+    assert out2["bands"]["5"] == {"frequency": 2500, "gain": -6.0, "q": 1.4}
+    assert snap["snapshot"]["input"]["1"]["bands"]["2"]["gain"] == 3.0
+
+    # eigene Sendung über den Dienst -> sofort im Stream (für weitere Tablets)
+    await hass.services.async_call(DOMAIN, "set_peq", {"side": "output", "channel": 2, "band": 5, "gain": -3.5},
+                                   blocking=True)
+    ev = (await ws.receive_json())["event"]
+    assert ev == {"side": "output", "channel": 2, "band": 5, "param": "gain", "value": -3.5}
+    await asyncio.sleep(0.1)
+    assert any(ib.decode_set(p)["kind"] == "peq" and ib.decode_set(p)["side"] == "output" for p in _sets(fake))
     assert await hass.config_entries.async_unload(entry.entry_id)

@@ -132,3 +132,45 @@ async def ws_subscribe_meters(hass: HomeAssistant, connection, msg: dict) -> Non
 @callback
 def async_register_websocket(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_subscribe_meters)
+    websocket_api.async_register_command(hass, ws_subscribe_eq)
+
+
+# --- EQ-Stream für die EQ-Karte (Quellenwahl ohne Helfer) ---------------------
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/subscribe_eq",
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_subscribe_eq(hass: HomeAssistant, connection, msg: dict) -> None:
+    """Meldet zuerst den kompletten EQ-Stand aller Kanäle, danach jede Änderung.
+
+    Erste Meldung: {"snapshot": {"input": {ch: {...}}, "output": {...}}, "names": {...},
+    "entry_id": ..., "available": bool}; danach {"side", "channel", "band"?, "param", "value"}.
+    """
+    loaded = hass.data.get(DOMAIN, {})
+    entry_id = msg.get("entry_id") or (next(iter(loaded)) if len(loaded) == 1 else None)
+    coordinator = loaded.get(entry_id) if entry_id else None
+    if coordinator is None or coordinator.dsp is None:
+        connection.send_error(msg["id"], "not_found", "Integra nicht gefunden – bitte entry_id angeben")
+        return
+    dsp = coordinator.dsp
+    names = {
+        "in": [coordinator.channel_name("input", i, coordinator.options) for i in range(coordinator.inputs)],
+        "out": [coordinator.channel_name("output", i, coordinator.options) for i in range(coordinator.outputs)],
+    }
+
+    @callback
+    def forward(event: dict) -> None:
+        if event.get("kind") != "peq":
+            return
+        payload = {k: event[k] for k in ("side", "channel", "band", "param", "value") if k in event}
+        connection.send_message(websocket_api.event_message(msg["id"], payload))
+
+    connection.send_result(msg["id"])
+    connection.send_message(websocket_api.event_message(msg["id"], {
+        "snapshot": dsp.eq_snapshot(), "names": names, "entry_id": entry_id,
+        "available": dsp.available,
+    }))
+    connection.subscriptions[msg["id"]] = dsp.add_eq_listener(forward)

@@ -7,6 +7,9 @@
  *   entry_id: 01J…            # optional, nur bei mehreren Integra nötig
  *   inputs: [Headset 1, Headset 2, …]    # optional: eigene Namen (sonst Gerätenamen)
  *   outputs: [Saal L, Saal R, …]
+ *   input_channels: [1, 2, 3, 4, 7, 8]   # optional: nur diese Eingänge anzeigen (1-basiert)
+ *   output_channels: [1, 2, 3, 4, 5]     # optional: nur diese Ausgänge anzeigen
+ *                                        # (Namen in inputs/outputs gelten immer je Kanal 1…8)
  *   min_db: -60               # Skala unten
  *   max_db: 0                 # Skala oben
  *   height: 220               # px
@@ -16,7 +19,7 @@
  * Integration – nur solange die Karte sichtbar ist. Keine Entitäten, kein Recorder.
  */
 
-const METER_VERSION = "1.7.0";
+const METER_VERSION = "1.8.0";
 const PEAK_HOLD_MS = 1500;
 const FALL_DB_PER_S = 30;      // Abfallgeschwindigkeit der Anzeige
 
@@ -35,6 +38,8 @@ class WorkIntegraMeterCard extends HTMLElement {
       interval: Number(config.interval) || 0.1,
       inNames: config.inputs,
       outNames: config.outputs,
+      inCh: WorkIntegraMeterCard._channels(config.input_channels),
+      outCh: WorkIntegraMeterCard._channels(config.output_channels),
     };
     this._names = { in: [], out: [] };
     this._target = { in: [], out: [] };
@@ -43,6 +48,12 @@ class WorkIntegraMeterCard extends HTMLElement {
     this._peakAt = { in: [], out: [] };
     this._lastMsg = 0;
     if (!this.shadowRoot) this._build();
+  }
+
+  static _channels(list) {
+    if (!Array.isArray(list)) return null;
+    const out = list.map((c) => Number(c) - 1).filter((c) => Number.isInteger(c) && c >= 0);
+    return out.length ? out : null;
   }
 
   set hass(hass) {
@@ -184,8 +195,13 @@ class WorkIntegraMeterCard extends HTMLElement {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     const { min, max } = this._config;
-    const nIn = Math.max(this._target.in.length, (this._config.inNames || []).length, 8);
-    const nOut = Math.max(this._target.out.length, (this._config.outNames || []).length, 8);
+    const all = (k, names) => {
+      const n = Math.max(this._target[k].length, (names || []).length, 8);
+      return [...Array(n).keys()];
+    };
+    const chIn = this._config.inCh || all("in", this._config.inNames);
+    const chOut = this._config.outCh || all("out", this._config.outNames);
+    const nIn = chIn.length, nOut = chOut.length;
     const scaleW = 30, gap = 18, labelH = 30, top = 18, bottom = H - labelH;
     const barsW = W - scaleW - gap;
     const slot = barsW / (nIn + nOut);
@@ -203,13 +219,13 @@ class WorkIntegraMeterCard extends HTMLElement {
       ctx.beginPath(); ctx.moveTo(scaleW, yy + 0.5); ctx.lineTo(W, yy + 0.5); ctx.stroke();
     }
 
-    const group = (k, n, x0, names, label) => {
+    const group = (k, chans, x0, names, label) => {
       ctx.fillStyle = "#8b95a1";
       ctx.textAlign = "left";
       ctx.font = "600 10px Roboto, sans-serif";
       ctx.fillText(label, x0 + (slot - barW) / 2, 11);
-      for (let i = 0; i < n; i++) {
-        const x = x0 + i * slot + (slot - barW) / 2;
+      chans.forEach((i, pos) => {
+        const x = x0 + pos * slot + (slot - barW) / 2;
         // Hintergrund
         ctx.fillStyle = "#12161b";
         ctx.fillRect(x, top, barW, bottom - top);
@@ -251,14 +267,14 @@ class WorkIntegraMeterCard extends HTMLElement {
         ctx.fillStyle = "#6f7a86";
         ctx.fillText(val, cx, bottom + 25);
         ctx.restore();
-      }
+      });
     };
     const xIn = scaleW + 4;
-    group("in", nIn, xIn, this._config.inNames || this._names.in, "EINGÄNGE");
+    group("in", chIn, xIn, this._config.inNames || this._names.in, "EINGÄNGE");
     const xOut = xIn + nIn * slot + gap;
     ctx.strokeStyle = "#232a33";
     ctx.beginPath(); ctx.moveTo(xOut - gap / 2, top); ctx.lineTo(xOut - gap / 2, bottom + 26); ctx.stroke();
-    group("out", nOut, xOut, this._config.outNames || this._names.out, "AUSGÄNGE");
+    group("out", chOut, xOut, this._config.outNames || this._names.out, "AUSGÄNGE");
   }
 }
 

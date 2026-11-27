@@ -11,13 +11,23 @@
           "inputs": "Anzahl Input-Kanäle",
           "dsp_port": "UDP-Port DSP-Protokoll (EQ/Presets)"
         }
+      },
+      "reconfigure": {
+        "title": "Integra neu verbinden",
+        "description": "Neue IP-Adresse oder Ports der Integra. Entitäten, Kanalnamen und Dashboards bleiben erhalten.",
+        "data": {
+          "host": "IP-Adresse",
+          "port": "UDP-Port",
+          "dsp_port": "UDP-Port DSP-Protokoll (EQ/Presets)"
+        }
       }
     },
     "error": {
       "cannot_connect": "Verbindung fehlgeschlagen. Prüfe IP, Port und ob \"central control reply\" am Gerät aktiv ist."
     },
     "abort": {
-      "already_configured": "Diese Integra ist bereits eingerichtet."
+      "already_configured": "Diese Integra ist bereits eingerichtet.",
+      "reconfigure_successful": "Die neue Verbindung wurde gespeichert."
     }
   },
   "options": {

@@ -10,6 +10,14 @@
  *   # bands:
  *   #   - {gain: input_number.x, frequency: input_number.y, q: input_number.z}
  *   # bypass: input_boolean.x
+ *
+ *   # Direktmodus (ohne Helfer): Quelle oben in der Karte wählen
+ *   # source_select: true
+ *   # input_channels: [1, 2, 3, 4, 7, 8]   # optional, 1-basiert
+ *   # output_channels: [1, 2, 3, 4, 5]
+ *   # side: input                          # Startauswahl
+ *   # channel: 1
+ *   # entry_id / device_id                 # nur bei mehreren Integra nötig
  *   db_range: 15                # ±dB der Grafik
  *   height: 300                 # px
  *
@@ -18,7 +26,7 @@
  * Regler unter der Grafik.
  */
 
-const VERSION = "1.7.0";
+const VERSION = "1.8.0";
 const COLORS = ["#ff4d4d", "#ff9f1a", "#ffd60a", "#4cd964", "#2ee6d6", "#3d9bff", "#9b6bff", "#ff5fd2"];
 const DEFAULT_FREQ = [60, 125, 500, 1000, 2000, 4000, 8000, 16000];
 const F_MIN = 20, F_MAX = 20000, Q_MIN = 0.1, Q_MAX = 20;
@@ -51,13 +59,13 @@ function peakingDb(f, f0, gainDb, q) {
 
 class WorkIntegraEqCard extends HTMLElement {
   static getStubConfig() {
-    return { title: "Equalizer", prefix: "in1" };
+    return { title: "Equalizer", source_select: true };
   }
 
   setConfig(config) {
-    if (!config.prefix && !Array.isArray(config.bands)) {
-      throw new Error("Bitte 'prefix' (z. B. in1) oder 'bands' angeben.");
-    }
+    const direct = !!config.source_select || (!config.prefix && !Array.isArray(config.bands));
+    if (direct) return this._setDirectConfig(config);
+    this._direct = false;
     const bands = Array.isArray(config.bands)
       ? config.bands
       : Array.from({ length: config.band_count || 8 }, (_, i) => ({
@@ -82,9 +90,140 @@ class WorkIntegraEqCard extends HTMLElement {
     this._renderAll();
   }
 
+  _setDirectConfig(config) {
+    this._direct = true;
+    const chans = (l) => (Array.isArray(l) ? l.map(Number).filter((c) => Number.isInteger(c) && c > 0) : null);
+    this._config = {
+      title: config.title ?? "Equalizer",
+      range: Number(config.db_range) || 15,
+      height: Number(config.height) || 300,
+      bypass: null,
+      bands: Array.from({ length: 8 }, () => ({})),
+      entry_id: config.entry_id,
+      device_id: config.device_id,
+      inCh: chans(config.input_channels),
+      outCh: chans(config.output_channels),
+    };
+    this._src = { side: config.side === "output" ? "output" : "input", channel: Number(config.channel) || 0 };
+    this._eq = this._eq || { input: {}, output: {} };
+    this._names = this._names || { in: [], out: [] };
+    this._vals = this._config.bands.map((_, i) => ({ f: DEFAULT_FREQ[i] || 1000, g: 0, q: 0.71 }));
+    this._hold = this._config.bands.map(() => 0);
+    this._lastSent = this._config.bands.map(() => ({}));
+    this._sel = 0;
+    this._drag = null;
+    this._width = this._width || 600;
+    if (!this.shadowRoot) this._build();
+    this._fixSource();
+    this._renderAll();
+  }
+
+  _channelsFor(side) {
+    const list = side === "input" ? this._config.inCh : this._config.outCh;
+    if (list) return list;
+    const n = Math.max((side === "input" ? this._names.in : this._names.out).length, 8);
+    return Array.from({ length: n }, (_, i) => i + 1);
+  }
+
+  _fixSource() {
+    const list = this._channelsFor(this._src.side);
+    if (!list.includes(this._src.channel)) this._src.channel = list[0];
+  }
+
+  _chanName(side, ch) {
+    const n = (side === "input" ? this._names.in : this._names.out)[ch - 1];
+    return n || `${side === "input" ? "IN" : "OUT"} ${ch}`;
+  }
+
+  async _subscribeEq() {
+    if (this._unsub || this._subscribing || !this._hass) return;
+    this._subscribing = true;
+    const msg = { type: "work_integra/subscribe_eq" };
+    if (this._config.entry_id) msg.entry_id = this._config.entry_id;
+    try {
+      this._unsub = await this._hass.connection.subscribeMessage((d) => this._onEq(d), msg);
+      this._eqError = null;
+    } catch (err) {
+      this._eqError = err.message || err.code || String(err);
+    } finally {
+      this._subscribing = false;
+      this._renderAll();
+    }
+  }
+
+  connectedCallback() {
+    if (this._direct && this._hass) this._subscribeEq();
+  }
+
+  disconnectedCallback() {
+    if (this._unsub) {
+      try { this._unsub(); } catch (_e) { /* Verbindung weg */ }
+      this._unsub = null;
+    }
+  }
+
+  _chan(side, ch) {
+    const s = this._eq[side];
+    s[ch] = s[ch] || { bypass: null, bands: {} };
+    return s[ch];
+  }
+
+  _onEq(d) {
+    if (d.snapshot) {
+      this._eq = { input: {}, output: {} };
+      for (const side of ["input", "output"]) {
+        for (const [ch, v] of Object.entries(d.snapshot[side] || {})) {
+          this._eq[side][Number(ch)] = { bypass: v.bypass, bands: v.bands || {} };
+        }
+      }
+      if (d.names) this._names = d.names;
+      this._fixSource();
+      this._hold = this._hold.map(() => 0);
+      this._loadSource();
+      this._renderAll();
+      return;
+    }
+    const c = this._chan(d.side, d.channel);
+    if (d.param === "bypass") c.bypass = !!d.value;
+    else if (d.band) (c.bands[d.band] = c.bands[d.band] || {})[d.param] = d.value;
+    if (d.side === this._src.side && d.channel === this._src.channel) {
+      this._loadSource();
+      this._scheduleRender();
+    }
+  }
+
+  /** Werte der gewählten Quelle in die Anzeige übernehmen (außer gerade bediente Bänder). */
+  _loadSource() {
+    const c = this._eq[this._src.side][this._src.channel];
+    const now = Date.now();
+    this._vals.forEach((v, i) => {
+      if ((this._drag && this._drag.band === i) || now < this._hold[i]) return;
+      const b = (c && c.bands[i + 1]) || {};
+      v.f = clamp(Number.isFinite(b.frequency) ? b.frequency : DEFAULT_FREQ[i] || 1000, F_MIN, F_MAX);
+      v.g = clamp(Number.isFinite(b.gain) ? b.gain : 0, -this._config.range, this._config.range);
+      v.q = clamp(Number.isFinite(b.q) ? b.q : 0.71, Q_MIN, Q_MAX);
+    });
+    this._missing = !c;
+  }
+
+  _selectSource(side, channel) {
+    this._flush();
+    this._src = { side, channel };
+    this._fixSource();
+    this._hold = this._hold.map(() => 0);
+    this._lastSent = this._lastSent.map(() => ({}));
+    this._drag = null;
+    this._loadSource();
+    this._renderAll();
+  }
+
   set hass(hass) {
     this._hass = hass;
     if (!this._config) return;
+    if (this._direct) {
+      if (this.isConnected) this._subscribeEq();
+      return;
+    }
     const now = Date.now();
     this._config.bands.forEach((b, i) => {
       if ((this._drag && this._drag.band === i) || now < this._hold[i]) return;
@@ -145,8 +284,20 @@ class WorkIntegraEqCard extends HTMLElement {
         .reset { border: 1px solid #39424d; background: #151a20; color: #c7ced6; border-radius: 6px; padding: 4px 10px;
           font-size: 12px; cursor: pointer; }
         .warn { padding: 0 14px 10px; color: #ff9f1a; font-size: 12px; }
+        .src { padding: 12px 12px 2px; display: flex; flex-direction: column; gap: 10px; }
+        .segs { display: flex; gap: 0; border: 1px solid #262d36; border-radius: 8px; overflow: hidden; align-self: flex-start; }
+        .seg { border: 0; background: #151a20; color: #9aa4af; padding: 8px 18px; font-size: 13px; font-weight: 700; cursor: pointer; }
+        .seg.on { background: #3d9bff; color: #06080a; }
+        .src-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+        .src-chip { flex: 1 1 90px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; border: 1px solid #262d36;
+          background: #151a20; color: #c7ced6; border-radius: 8px; padding: 7px 10px; cursor: pointer; text-align: left; min-width: 0; }
+        .src-chip .src-no { font-size: 10px; font-weight: 700; color: #6f7a86; letter-spacing: .6px; }
+        .src-chip .src-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+        .src-chip.on { background: #1b2a3c; border-color: #3d9bff; box-shadow: inset 0 0 0 1px #3d9bff; }
+        .src-chip.on .src-no { color: #3d9bff; }
       </style>
       <ha-card>
+        <div class="src" hidden></div>
         <div class="head"><div class="title"></div><button class="bypass">BYPASS</button></div>
         <div class="graph"><svg></svg></div>
         <div class="chips"></div>
@@ -163,7 +314,7 @@ class WorkIntegraEqCard extends HTMLElement {
     this._el = {
       title: $(".title"), bypass: $(".bypass"), svg: $("svg"), chips: $(".chips"), detail: $(".detail"),
       bn: $(".bn"), sf: $(".sf"), sg: $(".sg"), sq: $(".sq"), vf: $(".vf"), vg: $(".vg"), vq: $(".vq"),
-      reset: $(".reset"), warn: $(".warn"), graph: $(".graph"),
+      reset: $(".reset"), warn: $(".warn"), graph: $(".graph"), src: $(".src"),
     };
     new ResizeObserver(() => {
       const w = Math.round(this._el.graph.clientWidth);
@@ -254,6 +405,16 @@ class WorkIntegraEqCard extends HTMLElement {
   }
 
   _toggleBypass() {
+    if (this._direct) {
+      if (!this._hass) return;
+      const { side, channel } = this._src;
+      const c = this._chan(side, channel);
+      const next = !c.bypass;
+      c.bypass = next;   // sofort anzeigen; Rückmeldung kommt über den Stream
+      this._renderAll();
+      this._hass.callService("work_integra", "set_peq", this._target({ side, channel, band: 1, bypass: next }));
+      return;
+    }
     const id = this._config.bypass;
     if (!id || !this._hass) return;
     const on = this._hass.states[id]?.state === "on";
@@ -280,6 +441,23 @@ class WorkIntegraEqCard extends HTMLElement {
     this._lastFlush = Date.now();
     if (!this._hass || !this._pending) return;
     const map = { f: "frequency", g: "gain", q: "q" };
+    if (this._direct) {
+      const perBand = {};
+      for (const key of Object.keys(this._pending)) {
+        const [i, k] = key.split(":");
+        const val = this._vals[i][k];
+        if (this._lastSent[i][k] === val) continue;
+        this._lastSent[i][k] = val;
+        (perBand[i] = perBand[i] || {})[map[k]] = val;
+      }
+      const { side, channel } = this._src;
+      for (const [i, data] of Object.entries(perBand)) {
+        this._hass.callService("work_integra", "set_peq",
+          this._target({ side, channel, band: Number(i) + 1, ...data }));
+      }
+      this._pending = {};
+      return;
+    }
     for (const key of Object.keys(this._pending)) {
       const [i, k] = key.split(":");
       const ent = this._config.bands[i][map[k]];
@@ -297,8 +475,38 @@ class WorkIntegraEqCard extends HTMLElement {
     this._raf = requestAnimationFrame(() => { this._raf = null; this._renderAll(); });
   }
 
+  _target(data) {
+    return this._config.device_id ? { device_id: this._config.device_id, ...data } : data;
+  }
+
+  _renderSource() {
+    const el = this._el.src;
+    el.hidden = !this._direct;
+    if (!this._direct) return;
+    const { side, channel } = this._src;
+    const key = JSON.stringify([side, channel, this._channelsFor("input"), this._channelsFor("output"), this._names]);
+    if (key === this._srcKey) return;
+    this._srcKey = key;
+    const seg = (s, label) => `<button class="seg ${s === side ? "on" : ""}" data-side="${s}">${label}</button>`;
+    const chips = this._channelsFor(side).map((ch) =>
+      `<button class="src-chip ${ch === channel ? "on" : ""}" data-ch="${ch}">
+         <span class="src-no">${side === "input" ? "IN" : "OUT"} ${ch}</span><span class="src-name">${this._esc(this._chanName(side, ch))}</span></button>`).join("");
+    el.innerHTML = `<div class="segs">${seg("input", "Eingänge")}${seg("output", "Ausgänge")}</div><div class="src-chips">${chips}</div>`;
+    el.querySelectorAll(".seg").forEach((b) => b.addEventListener("click", () => {
+      const s = b.dataset.side;
+      if (s !== this._src.side) this._selectSource(s, this._channelsFor(s)[0]);
+    }));
+    el.querySelectorAll(".src-chip").forEach((b) => b.addEventListener("click", () =>
+      this._selectSource(this._src.side, Number(b.dataset.ch))));
+  }
+
+  _esc(s) {
+    return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+
   _renderAll() {
     if (!this._el || !this._config) return;
+    this._renderSource();
     this._renderHead();
     this._renderGraph();
     this._renderChips();
@@ -306,6 +514,17 @@ class WorkIntegraEqCard extends HTMLElement {
   }
 
   _renderHead() {
+    if (this._direct) {
+      const { side, channel } = this._src;
+      this._el.title.textContent = `${this._config.title} – ${this._chanName(side, channel)}`;
+      this._el.bypass.hidden = false;
+      this._el.bypass.classList.toggle("on", this._bypassed());
+      const msg = this._eqError ? `Keine Verbindung zur Integration: ${this._eqError}`
+        : this._missing && this._unsub ? "Für diesen Kanal liegen noch keine EQ-Werte vor – DSP-Verbindung prüfen." : "";
+      this._el.warn.hidden = !msg;
+      this._el.warn.textContent = msg;
+      return;
+    }
     this._el.title.textContent = this._config.title;
     const id = this._config.bypass;
     const st = id && this._hass ? this._hass.states[id] : null;
@@ -316,6 +535,10 @@ class WorkIntegraEqCard extends HTMLElement {
   }
 
   _bypassed() {
+    if (this._direct) {
+      const c = this._eq[this._src.side][this._src.channel];
+      return !!(c && c.bypass);
+    }
     const id = this._config.bypass;
     return !!(id && this._hass && this._hass.states[id]?.state === "on");
   }
